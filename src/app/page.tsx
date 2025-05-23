@@ -1,103 +1,269 @@
-import Image from "next/image";
+"use client"
 
-export default function Home() {
+import type React from "react"
+import Image from "next/image"
+
+import { useState } from "react"
+import { useRouter } from "next/navigation"
+import { motion, AnimatePresence } from "framer-motion"
+import {Eye, EyeOff, Loader2, CheckCircle2, ShieldCheck} from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { login } from "@/lib/auth"
+
+export default function LoginPage() {
+  const router = useRouter()
+  const [isLoading, setIsLoading] = useState(false)
+  const [isSuccess, setIsSuccess] = useState(false)
+  const [error, setError] = useState("")
+  const [showPassword, setShowPassword] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setIsLoading(true)
+    setError("")
+
+    const formData = new FormData(e.currentTarget)
+    const email = formData.get("email") as string
+    const password = formData.get("password") as string
+
+    try {
+      // Simulate a slight delay for better UX
+      await new Promise((resolve) => setTimeout(resolve, 800))
+
+      const response = await login({ identifier: email, password })
+      console.log("Login response:", response) // Debug log
+
+      if (response.success && response.data?.user?.type === "Admin") {
+        setIsSuccess(true)
+        // Wait for success animation before redirecting
+        setTimeout(() => {
+          router.push("/admin/dashboard")
+        }, 1000)
+      } else {
+        setError("Access denied. Admin privileges required.")
+        setIsLoading(false)
+      }
+    } catch (err) {
+      console.error("Login error:", err)
+      setError("Invalid email or password")
+      setIsLoading(false)
+    }
+  }
+
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword)
+  }
+
+  // Animation variants
+  const containerVariants = {
+    hidden: { opacity: 0, y: 20 },
+    visible: {
+      opacity: 1,
+      y: 0,
+      transition: {
+        duration: 0.6,
+        ease: "easeOut",
+      },
+    },
+    exit: {
+      opacity: 0,
+      y: -20,
+      transition: {
+        duration: 0.4,
+      },
+    },
+  }
+
+  const itemVariants = {
+    hidden: { opacity: 0, y: 10 },
+    visible: (custom: number) => ({
+      opacity: 1,
+      y: 0,
+      transition: {
+        delay: custom * 0.1,
+        duration: 0.5,
+        ease: "easeOut",
+      },
+    }),
+  }
+
+  const errorVariants = {
+    hidden: { opacity: 0, height: 0, marginBottom: 0 },
+    visible: {
+      opacity: 1,
+      height: "auto",
+      marginBottom: "0.75rem",
+      transition: {
+        duration: 0.3,
+        ease: "easeInOut",
+      },
+    },
+  }
+
+  const successVariants = {
+    hidden: { scale: 0.8, opacity: 0 },
+    visible: {
+      scale: 1,
+      opacity: 1,
+      transition: {
+        duration: 0.5,
+        ease: [0.22, 1, 0.36, 1],
+      },
+    },
+  }
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm/6 text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-[family-name:var(--font-geist-mono)] font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+      <main className="flex min-h-screen items-center justify-center bg-gradient-to-b from-gray-50 to-gray-100 p-4">
+        <AnimatePresence mode="wait">
+          {isSuccess ? (
+              <motion.div
+                  key="success"
+                  initial="hidden"
+                  animate="visible"
+                  variants={successVariants}
+                  className="flex flex-col items-center justify-center text-center"
+              >
+                <div className="rounded-full bg-yellow-100 p-3 mb-4">
+                  <CheckCircle2 className="h-12 w-12 text-yellow-500" />
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Login Successful!</h2>
+                <p className="text-gray-600 mb-4">Redirecting to dashboard...</p>
+                <div className="relative h-1 w-48 bg-gray-200 rounded-full overflow-hidden">
+                  <motion.div
+                      className="absolute top-0 left-0 h-full bg-yellow-500"
+                      initial={{ width: "0%" }}
+                      animate={{ width: "100%" }}
+                      transition={{ duration: 1, ease: "easeInOut" }}
+                  />
+                </div>
+              </motion.div>
+          ) : (
+              <motion.div
+                  key="login"
+                  initial="hidden"
+                  animate="visible"
+                  exit="exit"
+                  variants={containerVariants}
+                  className="w-full max-w-md"
+              >
+                <Card className="w-full shadow-xl border-0">
+                  <CardHeader className="space-y-1 pb-6">
+                    <motion.div className="mx-auto mb-6 text-center" variants={itemVariants} custom={0}>
+                      <Image
+                          src="/dala-black.png"
+                          alt="Logo"
+                          width={180}
+                          height={100}
+                          className="rounded-xs mx-auto mb-4"
+                          />
+                    </motion.div>
+                    <motion.div variants={itemVariants} custom={1}>
+                      <CardTitle className="text-2xl font-bold text-center">Welcome back</CardTitle>
+                      <CardDescription className="text-center mt-2">
+                        Enter your credentials to access your account
+                      </CardDescription>
+                    </motion.div>
+                  </CardHeader>
+                  <CardContent>
+                    <form onSubmit={handleSubmit} className="space-y-5">
+                      <AnimatePresence>
+                        {error && (
+                            <motion.div
+                                key="error"
+                                initial="hidden"
+                                animate="visible"
+                                exit="hidden"
+                                variants={errorVariants}
+                                className="p-3 text-sm text-white bg-red-500 rounded-md text-center"
+                            >
+                              {error}
+                            </motion.div>
+                        )}
+                      </AnimatePresence>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
+                      <motion.div className="space-y-2" variants={itemVariants} custom={2}>
+                        <Label htmlFor="email" className="text-sm font-medium">
+                          Email
+                        </Label>
+                        <Input
+                            id="email"
+                            name="email"
+                            placeholder="name@company.com"
+                            type="email"
+                            autoCapitalize="none"
+                            autoComplete="email"
+                            autoCorrect="off"
+                            required
+                            disabled={isLoading}
+                            className="border border-gray-200 rounded-md p-2 w-full focus:border-[#ffd428] focus:ring-[#ffd428]"
+                        />
+                      </motion.div>
+
+                      <motion.div className="space-y-2" variants={itemVariants} custom={3}>
+                        <Label htmlFor="password" className="text-sm font-medium">
+                          Password
+                        </Label>
+                        <div className="relative">
+                          <Input
+                              id="password"
+                              name="password"
+                              type={showPassword ? "text" : "password"}
+                              placeholder="••••••••"
+                              autoComplete="current-password"
+                              required
+                              disabled={isLoading}
+                              className="border border-gray-200 rounded-md p-2 w-full pr-10 focus:border-[#ffd428] focus:ring-[#ffd428]"
+                          />
+                          <button
+                              type="button"
+                              onClick={togglePasswordVisibility}
+                              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
+                              tabIndex={-1}
+                          >
+                            {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                          </button>
+                        </div>
+                      </motion.div>
+
+                      <motion.div variants={itemVariants} custom={4} className="pt-2">
+                        <Button
+                            className="w-full bg-[#ffd428] hover:bg-[#ffd428]/90 text-[#242a37] font-semibold py-6 rounded-md h-11 transition-all duration-200 ease-in-out"
+                            type="submit"
+                            disabled={isLoading}
+                        >
+                          {isLoading ? (
+                              <motion.div className="flex items-center justify-center">
+                                <motion.div
+                                    className="mr-2 flex items-center justify-center"
+                                    animate={{ rotate: 360 }}
+                                    transition={{ duration: 1, repeat: Number.POSITIVE_INFINITY, ease: "linear" }}
+                                >
+                                  <Loader2 className="h-4 w-4" />
+                                </motion.div>
+                                <span>Signing in...</span>
+                              </motion.div>
+                          ) : (
+                              "Sign In"
+                          )}
+                        </Button>
+                      </motion.div>
+
+                      <motion.div variants={itemVariants} custom={5} className="text-center text-sm text-gray-500 mt-4">
+                        <div className="flex items-center justify-center mb-2">
+                          <ShieldCheck/>
+                          <p> Secure login provided by MySafari</p>
+                        </div>
+                      </motion.div>
+                    </form>
+                  </CardContent>
+                </Card>
+              </motion.div>
+          )}
+        </AnimatePresence>
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
-    </div>
-  );
+  )
 }
