@@ -772,6 +772,33 @@ export default function UsersPage() {
                         )}
                       </div>
 
+                      {userDetails.otp && (
+                          <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
+                            <h4 className="text-sm font-medium text-primary mb-2">One-Time Password (OTP)</h4>
+                            <div className="flex items-center gap-2">
+                              <code className="bg-background border rounded px-3 py-2 text-lg font-mono font-bold tracking-wider">
+                                {userDetails.otp}
+                              </code>
+                              <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(userDetails.otp || "")
+                                    toast({
+                                      title: "Copied!",
+                                      description: "OTP copied to clipboard",
+                                    })
+                                  }}
+                              >
+                                Copy
+                              </Button>
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-2">
+                              Current OTP for this user. Share this with the user if they need to reset their password.
+                            </p>
+                          </div>
+                      )}
+
                       <div>
                         <h4 className="text-sm font-medium mb-1">Created At</h4>
                         <p className="text-sm">{new Date(userDetails.created_at).toLocaleString()}</p>
