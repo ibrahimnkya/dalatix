@@ -650,12 +650,7 @@ export default function BusStopsPage() {
                 className="mb-6"
             />
 
-            {isLoading ? (
-                <div className="flex justify-center items-center h-64">
-                    <LoadingSpinner size="lg" />
-                </div>
-            ) : (
-                <div className="bg-white rounded-lg shadow p-6">
+
                     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -802,8 +797,6 @@ export default function BusStopsPage() {
                             </div>
                         </div>
                     )}
-                </div>
-            )}
 
             {/* View Bus Stop Dialog */}
             <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>

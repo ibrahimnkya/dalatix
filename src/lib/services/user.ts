@@ -4,6 +4,7 @@ export interface User {
     last_name: string
     email: string
     phone_number?: string
+    otp?: number
     id_number?: string
     is_active: boolean
     use_float?: boolean
@@ -36,7 +37,6 @@ export interface CreateUserData {
     company_id: number
     type: string
     password: string
-    otp?: string
 }
 
 export interface UpdateUserData {
@@ -50,7 +50,6 @@ export interface UpdateUserData {
     company_id: number
     type: string
     password?: string
-    otp?: string
 }
 
 interface GetUsersParams {

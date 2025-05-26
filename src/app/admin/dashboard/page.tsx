@@ -8,7 +8,7 @@ import { CalendarDateRangePicker } from "@/components/dashboard/date-range-picke
 import { BookingsDistribution } from "@/components/dashboard/bookings-distribution"
 import { RevenueDistribution } from "@/components/dashboard/revenue-distribution"
 import { useMobile } from "@/hooks/use-mobile"
-import { format } from "date-fns"
+import { format } from "date-fns";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { QuickActions } from "@/components/dashboard/quick-actions"
@@ -113,7 +113,9 @@ export default function DashboardPage() {
 
     setIsExporting(true)
     try {
+      // @ts-ignore
       const startDate = dateRange.from ? format(dateRange.from, "yyyy-MM-dd") : ""
+      // @ts-ignore
       const endDate = dateRange.to ? format(dateRange.to, "yyyy-MM-dd") : ""
 
       if (!startDate || !endDate) {

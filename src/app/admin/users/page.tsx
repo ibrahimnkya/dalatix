@@ -90,6 +90,11 @@ export default function UsersPage() {
   const [userToEdit, setUserToEdit] = useState<any>(null)
   const [isLoadingCompanies, setIsLoadingCompanies] = useState(false)
 
+  // Add these new state variables after the existing state declarations (around line 60)
+  const [createdUserOtp, setCreatedUserOtp] = useState<string | null>(null)
+  const [isOtpDialogOpen, setIsOtpDialogOpen] = useState(false)
+  const [createdUserInfo, setCreatedUserInfo] = useState<any>(null)
+
   // Fetch users
   const fetchUsers = async () => {
     setIsLoading(true)
@@ -192,7 +197,7 @@ export default function UsersPage() {
     }
   }
 
-  // Create user
+  // Replace the existing createUser function (around line 180)
   const createUser = async (userData: any) => {
     try {
       const response = await fetch("/api/proxy/users", {
@@ -206,6 +211,20 @@ export default function UsersPage() {
       if (!response.ok) {
         const errorData = await response.json()
         throw new Error(errorData.message || "Failed to create user")
+      }
+
+      const result = await response.json()
+
+      // Extract OTP and user info from response
+      if (result.data && result.data.otp) {
+        setCreatedUserOtp(result.data.otp)
+        setCreatedUserInfo({
+          name: `${result.data.first_name} ${result.data.last_name}`,
+          email: result.data.email,
+          type: result.data.type,
+          float_account: result.data.float_account,
+        })
+        setIsOtpDialogOpen(true)
       }
 
       toast({
@@ -916,6 +935,76 @@ export default function UsersPage() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        {/* OTP Display Dialog */}
+        <Dialog open={isOtpDialogOpen} onOpenChange={setIsOtpDialogOpen}>
+          <DialogContent className="sm:max-w-[500px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Check className="h-5 w-5 text-green-500" />
+                User Created Successfully
+              </DialogTitle>
+              <DialogDescription>
+                The user has been created and assigned the following OTP for initial login.
+              </DialogDescription>
+            </DialogHeader>
+
+            {createdUserInfo && (
+                <div className="space-y-4 py-4">
+                  <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+                    <div>
+                      <h4 className="text-sm font-medium text-muted-foreground">User Details</h4>
+                      <p className="font-medium">{createdUserInfo.name}</p>
+                      <p className="text-sm text-muted-foreground">{createdUserInfo.email}</p>
+                      <p className="text-sm text-muted-foreground">Type: {createdUserInfo.type}</p>
+                      {createdUserInfo.float_account && (
+                          <p className="text-sm text-muted-foreground">Float Account: {createdUserInfo.float_account}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-primary/5 border border-primary/20 rounded-lg p-4">
+                    <h4 className="text-sm font-medium text-primary mb-2">One-Time Password (OTP)</h4>
+                    <div className="flex items-center gap-2">
+                      <code className="bg-background border rounded px-3 py-2 text-lg font-mono font-bold tracking-wider">
+                        {createdUserOtp}
+                      </code>
+                      <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            navigator.clipboard.writeText(createdUserOtp || "")
+                            toast({
+                              title: "Copied!",
+                              description: "OTP copied to clipboard",
+                            })
+                          }}
+                      >
+                        Copy
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Share this OTP with the user for their initial login. They will be required to change their password
+                      after first login.
+                    </p>
+                  </div>
+                </div>
+            )}
+
+            <DialogFooter>
+              <Button
+                  onClick={() => {
+                    setIsOtpDialogOpen(false)
+                    setCreatedUserOtp(null)
+                    setCreatedUserInfo(null)
+                  }}
+                  className="w-full"
+              >
+                Close
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
   )
 }

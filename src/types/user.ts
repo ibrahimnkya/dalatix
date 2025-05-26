@@ -12,6 +12,7 @@ export interface User {
     company_id?: number
     type?: string
     password?: string
+    otp?: number
     created_at?: string
     updated_at?: string
     roles?: {
