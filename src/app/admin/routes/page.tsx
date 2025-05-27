@@ -148,24 +148,27 @@ export default function RoutesPage() {
         enabled: !!viewingRoute?.id,
     })
 
-    // Fetch bus stops for dropdowns
+    // Fetch ALL bus stops for dropdowns (without pagination)
     const {
         data: busStopsData,
         isLoading: isLoadingBusStops,
         isError: isErrorBusStops,
     } = useQuery({
-        queryKey: ["busStops"],
+        queryKey: ["allBusStops"],
         queryFn: async () => {
             const response = await getBusStops({
-                paginate: true,
-                page: 1,
+                paginate: false, // Remove pagination to get all bus stops
             })
             return response
         },
     })
 
     // Extract bus stops array from the response
-    const busStops = busStopsData?.data?.data || []
+    const busStops = Array.isArray(busStopsData?.data)
+        ? busStopsData.data
+        : busStopsData?.data?.data && Array.isArray(busStopsData.data.data)
+            ? busStopsData.data.data
+            : []
 
     // Create route mutation
     const createRouteMutation = useMutation({
