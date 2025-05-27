@@ -1,11 +1,9 @@
 "use client"
 
 import type React from "react"
-
 import type { Route, CreateRouteData, UpdateRouteData } from "@/types/route"
 import { useState, useEffect } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { PageHeader } from "@/components/page-header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -18,14 +16,16 @@ import {
     DialogTitle,
 } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 import { useToast } from "@/components/ui/use-toast"
 import { getRoutes, getRoute, createRoute, updateRoute, deleteRoute } from "@/lib/services/route"
-import { LoadingSpinner } from "@/components/loading-spinner"
+import { getBusStops } from "@/lib/services/bus-stop"
 import {
     Plus,
     Search,
@@ -39,8 +39,9 @@ import {
     ChevronDown,
     RefreshCw,
     AlertCircle,
-    ArrowLeft,
-    ArrowRight,
+    ChevronLeft,
+    ChevronRight,
+    RouteIcon,
 } from "lucide-react"
 import {
     DropdownMenu,
@@ -59,28 +60,7 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 
-// Import the bus stops service
-import { getBusStops } from "@/lib/services/bus-stop"
-
-// Function to calculate distance between two coordinates using Haversine formula
-const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
-    const R = 6371 // Radius of the earth in km
-    const dLat = (lat2 - lat1) * (Math.PI / 180)
-    const dLon = (lon2 - lon1) * (Math.PI / 180)
-    const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2)
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-    const distance = R * c // Distance in km
-    return Number(distance.toFixed(2))
-}
-
-// Function to estimate journey time based on distance
-const estimateJourneyTime = (distanceKm: number): number => {
-    const avgSpeedKmh = 40 // Average speed in km/h (adjust as needed)
-    const timeHours = distanceKm / avgSpeedKmh
-    return Number(timeHours.toFixed(2))
-}
+const ITEMS_PER_PAGE = 10
 
 export default function RoutesPage() {
     const { toast } = useToast()
@@ -90,7 +70,6 @@ export default function RoutesPage() {
     const [searchQuery, setSearchQuery] = useState("")
     const [statusFilter, setStatusFilter] = useState<string[]>([])
     const [currentPage, setCurrentPage] = useState(1)
-    const [pageSize] = useState(10)
 
     // State for dialogs
     const [isAddEditDialogOpen, setIsAddEditDialogOpen] = useState(false)
@@ -117,21 +96,54 @@ export default function RoutesPage() {
     // Form validation errors
     const [formErrors, setFormErrors] = useState<Record<string, string>>({})
 
-    // Fetch routes with React Query
+    // Reset to first page when search query or filters change
+    useEffect(() => {
+        setCurrentPage(1)
+    }, [searchQuery, statusFilter])
+
+    // Fetch all routes for statistics (without pagination)
+    const {
+        data: allRoutesData,
+        isLoading: isLoadingAllRoutes,
+        refetch: refetchAllRoutes,
+    } = useQuery({
+        queryKey: ["allRoutes"],
+        queryFn: async () => {
+            const response = await getRoutes({
+                paginate: false, // Get all routes for statistics
+            })
+            return response
+        },
+    })
+
+    // Fetch paginated routes for table display
     const {
         data: routesData,
         isLoading: isLoadingRoutes,
         isError: isErrorRoutes,
         refetch: refetchRoutes,
     } = useQuery({
-        queryKey: ["routes", currentPage, pageSize, statusFilter],
+        queryKey: ["routes", currentPage, ITEMS_PER_PAGE, searchQuery, statusFilter],
         queryFn: async () => {
-            const response = await getRoutes({
+            // Build query parameters
+            const params: any = {
                 paginate: true,
                 page: currentPage,
-                is_active: statusFilter.length === 1 ? statusFilter[0] === "active" : undefined,
-            })
-            console.log("API Response:", response) // Debug log
+                per_page: ITEMS_PER_PAGE,
+            }
+
+            // Add search query if provided
+            if (searchQuery.trim()) {
+                params.search = searchQuery.trim()
+            }
+
+            // Add status filter if provided
+            if (statusFilter.length === 1) {
+                params.is_active = statusFilter[0] === "active"
+            }
+
+            const response = await getRoutes(params)
+            console.log("Paginated API Response:", response)
             return response
         },
     })
@@ -148,16 +160,16 @@ export default function RoutesPage() {
         enabled: !!viewingRoute?.id,
     })
 
-    // Fetch ALL bus stops for dropdowns (without pagination)
+    // Fetch bus stops for dropdowns
     const {
         data: busStopsData,
         isLoading: isLoadingBusStops,
         isError: isErrorBusStops,
     } = useQuery({
-        queryKey: ["allBusStops"],
+        queryKey: ["busStops"],
         queryFn: async () => {
             const response = await getBusStops({
-                paginate: false, // Remove pagination to get all bus stops
+                paginate: false,
             })
             return response
         },
@@ -174,10 +186,10 @@ export default function RoutesPage() {
     const createRouteMutation = useMutation({
         mutationFn: (data: CreateRouteData) => createRoute(data),
         onSuccess: () => {
-            // Invalidate and refetch routes query to update the UI
             queryClient.invalidateQueries({ queryKey: ["routes"] })
+            queryClient.invalidateQueries({ queryKey: ["allRoutes"] })
             refetchRoutes()
-
+            refetchAllRoutes()
             toast({
                 title: "Route created",
                 description: "The route has been created successfully.",
@@ -197,10 +209,10 @@ export default function RoutesPage() {
     const updateRouteMutation = useMutation({
         mutationFn: ({ id, data }: { id: number; data: UpdateRouteData }) => updateRoute(id, data),
         onSuccess: () => {
-            // Invalidate and refetch routes query to update the UI
             queryClient.invalidateQueries({ queryKey: ["routes"] })
+            queryClient.invalidateQueries({ queryKey: ["allRoutes"] })
             refetchRoutes()
-
+            refetchAllRoutes()
             toast({
                 title: "Route updated",
                 description: "The route has been updated successfully.",
@@ -220,10 +232,10 @@ export default function RoutesPage() {
     const deleteRouteMutation = useMutation({
         mutationFn: (id: number) => deleteRoute(id),
         onSuccess: () => {
-            // Invalidate and refetch routes query to update the UI
             queryClient.invalidateQueries({ queryKey: ["routes"] })
+            queryClient.invalidateQueries({ queryKey: ["allRoutes"] })
             refetchRoutes()
-
+            refetchAllRoutes()
             toast({
                 title: "Route deleted",
                 description: "The route has been deleted successfully.",
@@ -239,69 +251,83 @@ export default function RoutesPage() {
         },
     })
 
-    // Extract routes and pagination data
+    // Extract all routes for statistics calculation
+    const allRoutes = Array.isArray(allRoutesData?.data)
+        ? allRoutesData.data
+        : allRoutesData?.data?.data && Array.isArray(allRoutesData.data.data)
+            ? allRoutesData.data.data
+            : []
+
+    // Extract paginated routes for table display
     const routes = Array.isArray(routesData?.data)
         ? routesData.data
         : routesData?.data?.data && Array.isArray(routesData.data.data)
             ? routesData.data.data
             : []
+
+    // Extract pagination data from server response
     const pagination = {
-        currentPage: routesData?.meta?.current_page || 1,
-        totalPages: routesData?.meta?.last_page || 1,
-        totalItems: routesData?.meta?.total || 0,
-        perPage: routesData?.meta?.per_page || 10,
+        currentPage: routesData?.data?.current_page || routesData?.meta?.current_page || 1,
+        totalPages: routesData?.data?.last_page || routesData?.meta?.last_page || 1,
+        totalItems: routesData?.data?.total || routesData?.meta?.total || 0,
+        perPage: routesData?.data?.per_page || routesData?.meta?.per_page || ITEMS_PER_PAGE,
+        from: routesData?.data?.from || routesData?.meta?.from || 0,
+        to: routesData?.data?.to || routesData?.meta?.to || 0,
     }
 
-    // Calculate total distance with proper error handling
-    const calculateTotalDistance = () => {
-        if (!Array.isArray(routes) || routes.length === 0) {
-            return 0
+    // Calculate actual route statistics from ALL routes
+    const getRouteStats = () => {
+        if (!Array.isArray(allRoutes) || allRoutes.length === 0) {
+            return { total: 0, active: 0, inactive: 0, totalDistance: 0, avgFare: 0 }
         }
 
-        return routes.reduce((sum, route) => {
-            // Ensure route exists and has a distance property that's a number
-            if (!route) return sum
+        const stats = allRoutes.reduce(
+            (acc, route) => {
+                if (!route) return acc
 
-            // Convert distance to a number if it's not already
-            const distance =
-                typeof route.distance === "number"
-                    ? route.distance
-                    : typeof route.distance === "string"
-                        ? Number.parseFloat(route.distance)
-                        : 0
+                acc.total++
 
-            // Only add valid numbers
-            return !isNaN(distance) ? sum + distance : sum
-        }, 0)
+                if (route.is_active) {
+                    acc.active++
+                } else {
+                    acc.inactive++
+                }
+
+                // Calculate total distance
+                const distance = typeof route.distance === "number" ? route.distance : Number.parseFloat(route.distance) || 0
+                if (!isNaN(distance)) {
+                    acc.totalDistance += distance
+                }
+
+                // Calculate total fare for average
+                const fare = typeof route.fare === "number" ? route.fare : Number.parseFloat(route.fare) || 0
+                if (!isNaN(fare)) {
+                    acc.totalFare += fare
+                    acc.fareCount++
+                }
+
+                return acc
+            },
+            { total: 0, active: 0, inactive: 0, totalDistance: 0, totalFare: 0, fareCount: 0 },
+        )
+
+        return {
+            total: stats.total,
+            active: stats.active,
+            inactive: stats.inactive,
+            totalDistance: stats.totalDistance,
+            avgFare: stats.fareCount > 0 ? stats.totalFare / stats.fareCount : 0,
+        }
     }
 
-    // Calculate stats
-    const stats = {
-        total: Array.isArray(routes) ? routes.length : 0,
-        active: Array.isArray(routes) ? routes.filter((route) => route && route.is_active).length : 0,
-        inactive: Array.isArray(routes) ? routes.filter((route) => route && !route.is_active).length : 0,
-        totalDistance: calculateTotalDistance(),
+    const stats = getRouteStats()
+
+    // Status color helper
+    const getStatusColor = (isActive: boolean) => {
+        return isActive
+            ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
+            : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100"
     }
-
-    // Filter routes based on search query
-    const filteredRoutes = Array.isArray(routes)
-        ? routes.filter((route: Route) => {
-            if (!route) return false
-
-            // Filter by search query
-            const name = (route.name || "").toLowerCase()
-            const query = searchQuery.toLowerCase()
-            const matchesSearch = name.includes(query)
-
-            // Filter by status
-            const matchesStatus =
-                statusFilter.length === 0 ||
-                (statusFilter.includes("active") && route.is_active) ||
-                (statusFilter.includes("inactive") && !route.is_active)
-
-            return matchesSearch && matchesStatus
-        })
-        : []
 
     // Validate form data
     const validateForm = () => {
@@ -341,7 +367,6 @@ export default function RoutesPage() {
 
     // Handle opening the add/edit dialog
     const handleAddEdit = (route?: Route) => {
-        // Reset form errors
         setFormErrors({})
 
         if (route) {
@@ -356,7 +381,6 @@ export default function RoutesPage() {
                 is_active: route.is_active !== undefined ? route.is_active : true,
             })
 
-            // Find and set the selected bus stops
             const startPoint = busStops.find((stop) => stop.id === route.start_point_id)
             const endPoint = busStops.find((stop) => stop.id === route.end_point_id)
             setSelectedStartPoint(startPoint || null)
@@ -394,7 +418,6 @@ export default function RoutesPage() {
     const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const { id, value, type } = e.target
 
-        // Clear the error for this field when user starts typing
         if (formErrors[id]) {
             setFormErrors({ ...formErrors, [id]: "" })
         }
@@ -406,7 +429,6 @@ export default function RoutesPage() {
     }
 
     const handleSelectChange = (id: string, value: string) => {
-        // Clear the error for this field when user makes a selection
         if (formErrors[id]) {
             setFormErrors({ ...formErrors, [id]: "" })
         }
@@ -417,7 +439,6 @@ export default function RoutesPage() {
             const pointId = Number.parseInt(value)
             setFormData({ ...formData, [id]: pointId })
 
-            // Find the bus stop and update the selected point
             const busStop = busStops.find((stop) => stop.id === pointId)
             if (busStop) {
                 if (id === "start_point_id") {
@@ -435,12 +456,10 @@ export default function RoutesPage() {
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault()
 
-        // Validate form before submission
         if (!validateForm()) {
             return
         }
 
-        // Prepare data for API
         const apiData: CreateRouteData = {
             name: formData.name,
             start_point_id: formData.start_point_id,
@@ -477,42 +496,58 @@ export default function RoutesPage() {
     // Toggle status filter
     const toggleStatusFilter = (status: string) => {
         setStatusFilter((current) => {
-            if (current.includes(status)) {
-                return current.filter((s) => s !== status)
-            } else {
-                return [...current, status]
-            }
+            const newFilter = current.includes(status) ? current.filter((s) => s !== status) : [...current, status]
+            return newFilter
         })
     }
 
-    // Auto-calculate distance and time when start and end points are selected
-    const calculateDistanceAndTime = () => {
-        if (selectedStartPoint && selectedEndPoint) {
-            const distance = calculateDistance(
-                selectedStartPoint.latitude,
-                selectedStartPoint.longitude,
-                selectedEndPoint.latitude,
-                selectedEndPoint.longitude,
-            )
-            const journeyTime = estimateJourneyTime(distance)
-
-            setFormData((prev) => ({
-                ...prev,
-                distance: distance,
-                estimated_journey_hours: journeyTime,
-            }))
-        }
+    // Handle search with debouncing
+    const handleSearch = (term: string) => {
+        setSearchQuery(term)
     }
 
-    useEffect(() => {
-        calculateDistanceAndTime()
-    }, [selectedStartPoint, selectedEndPoint])
+    // Handle refresh
+    const handleRefresh = () => {
+        refetchRoutes()
+        refetchAllRoutes()
+    }
+
+    // Helper function to safely format currency
+    const safeAmount = (amount: any) => {
+        if (!amount) return "TZS0"
+        const num = Number(amount)
+        return isNaN(num) ? "TZS0" : `TZS${num.toLocaleString()}`
+    }
 
     // Loading state
-    if (isLoadingRoutes) {
+    if (isLoadingRoutes || isLoadingAllRoutes) {
         return (
-            <div className="container mx-auto p-6 flex justify-center items-center h-64">
-                <LoadingSpinner size="lg" />
+            <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+                <div className="flex items-center justify-between space-y-2">
+                    <h2 className="text-3xl font-bold tracking-tight">Routes Management</h2>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                    {Array.from({ length: 4 }).map((_, index) => (
+                        <Card key={index}>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <Skeleton className="h-4 w-20" />
+                                <Skeleton className="h-4 w-4" />
+                            </CardHeader>
+                            <CardContent>
+                                <Skeleton className="h-8 w-16" />
+                            </CardContent>
+                        </Card>
+                    ))}
+                </div>
+                <Card>
+                    <CardContent className="p-6">
+                        <div className="space-y-2">
+                            {Array.from({ length: 5 }).map((_, index) => (
+                                <Skeleton key={index} className="h-12 w-full" />
+                            ))}
+                        </div>
+                    </CardContent>
+                </Card>
             </div>
         )
     }
@@ -520,12 +555,15 @@ export default function RoutesPage() {
     // Error state
     if (isErrorRoutes) {
         return (
-            <div className="container mx-auto p-6">
+            <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+                <div className="flex items-center justify-between space-y-2">
+                    <h2 className="text-3xl font-bold tracking-tight">Routes Management</h2>
+                </div>
                 <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded flex items-center">
                     <AlertCircle className="h-5 w-5 mr-2" />
                     <span>Error loading routes. Please try again.</span>
                 </div>
-                <Button variant="outline" className="mt-4" onClick={() => refetchRoutes()}>
+                <Button variant="outline" onClick={handleRefresh}>
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Retry
                 </Button>
@@ -534,44 +572,40 @@ export default function RoutesPage() {
     }
 
     return (
-        <div className="container mx-auto p-6 space-y-6">
-            <PageHeader
-                title="Routes Management"
-                description="Manage all transportation routes in the system"
-                actions={
-                    <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" onClick={() => refetchRoutes()}>
-                            <RefreshCw className="h-4 w-4 mr-2" />
-                            Refresh
-                        </Button>
-                        <Button variant="outline" size="sm">
-                            <Download className="h-4 w-4 mr-2" />
-                            Export
-                        </Button>
-                        <Button size="sm" onClick={() => handleAddEdit()}>
-                            <Plus className="h-4 w-4 mr-2" />
-                            Add Route
-                        </Button>
-                    </div>
-                }
-                className="mb-6"
-            />
+        <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+            <div className="flex items-center justify-between space-y-2">
+                <h2 className="text-3xl font-bold tracking-tight">Routes Management</h2>
+                <div className="flex items-center space-x-2">
+                    <Button variant="outline" onClick={handleRefresh}>
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Refresh
+                    </Button>
+                    <Button variant="outline">
+                        <Download className="mr-2 h-4 w-4" />
+                        Export
+                    </Button>
+                    <Button onClick={() => handleAddEdit()}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add Route
+                    </Button>
+                </div>
+            </div>
 
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Total Routes</CardTitle>
-                        <Map className="h-4 w-4 text-muted-foreground" />
+                        <RouteIcon className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{stats.total}</div>
-                        <p className="text-xs text-muted-foreground">All routes</p>
+                        <p className="text-xs text-muted-foreground">All routes in system</p>
                     </CardContent>
                 </Card>
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Active Routes</CardTitle>
-                        <Map className="h-4 w-4 text-green-500" />
+                        <RouteIcon className="h-4 w-4 text-green-500" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{stats.active}</div>
@@ -581,7 +615,7 @@ export default function RoutesPage() {
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Inactive Routes</CardTitle>
-                        <Map className="h-4 w-4 text-red-500" />
+                        <RouteIcon className="h-4 w-4 text-red-500" />
                     </CardHeader>
                     <CardContent>
                         <div className="text-2xl font-bold">{stats.inactive}</div>
@@ -600,151 +634,172 @@ export default function RoutesPage() {
                 </Card>
             </div>
 
-            <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
-                <div className="relative w-full md:w-96">
-                    <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                        placeholder="Search routes..."
-                        className="pl-8"
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                    />
-                </div>
-                <div className="flex gap-2 w-full md:w-auto">
-                    <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                            <Button variant="outline" size="sm">
-                                <ChevronDown className="mr-2 h-4 w-4" />
-                                Status:{" "}
-                                {statusFilter.length === 0
-                                    ? "All"
-                                    : statusFilter.map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join(", ")}
-                            </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                            <DropdownMenuCheckboxItem
-                                checked={statusFilter.includes("active")}
-                                onCheckedChange={() => toggleStatusFilter("active")}
-                            >
-                                Active
-                            </DropdownMenuCheckboxItem>
-                            <DropdownMenuCheckboxItem
-                                checked={statusFilter.includes("inactive")}
-                                onCheckedChange={() => toggleStatusFilter("inactive")}
-                            >
-                                Inactive
-                            </DropdownMenuCheckboxItem>
-                        </DropdownMenuContent>
-                    </DropdownMenu>
-                    <Button variant="outline" size="sm">
-                        <Download className="mr-2 h-4 w-4" />
-                        Export
-                    </Button>
-                </div>
-            </div>
-
-            <div className="rounded-md border">
-                <Table>
-                    <TableHeader>
-                        <TableRow>
-                            <TableHead>Name</TableHead>
-                            <TableHead>Start Point</TableHead>
-                            <TableHead>End Point</TableHead>
-                            <TableHead>Distance</TableHead>
-                            <TableHead>Est. Time</TableHead>
-                            <TableHead>Fare</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead className="text-right">Actions</TableHead>
-                        </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                        {filteredRoutes.length === 0 ? (
-                            <TableRow>
-                                <TableCell colSpan={8} className="h-24 text-center">
-                                    No routes found.
-                                </TableCell>
-                            </TableRow>
-                        ) : (
-                            filteredRoutes.map((route: Route) => (
-                                <TableRow key={route.id}>
-                                    <TableCell className="font-medium">{route.name}</TableCell>
-                                    <TableCell>{getBusStopName(route.start_point_id)}</TableCell>
-                                    <TableCell>{getBusStopName(route.end_point_id)}</TableCell>
-                                    <TableCell>{route.distance} km</TableCell>
-                                    <TableCell>{route.estimated_journey_hours} hr</TableCell>
-                                    <TableCell>{route.fare.toLocaleString()} TZS</TableCell>
-                                    <TableCell>
-                                        <div className="flex items-center gap-2">
-                                            {route.is_active ? (
-                                                <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800">
-                          <Check className="h-3 w-3 mr-1" />
-                          Active
-                        </span>
-                                            ) : (
-                                                <span className="inline-flex items-center rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-800">
-                          <X className="h-3 w-3 mr-1" />
-                          Inactive
-                        </span>
-                                            )}
-                                        </div>
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                        <div className="flex justify-end gap-2">
-                                            <Button variant="ghost" size="icon" onClick={() => handleViewRoute(route)} title="View Details">
-                                                <Eye className="h-4 w-4" />
-                                            </Button>
-                                            <Button variant="ghost" size="icon" onClick={() => handleAddEdit(route)} title="Edit Route">
-                                                <Edit className="h-4 w-4" />
-                                            </Button>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                onClick={() => handleDeleteDialog(route)}
-                                                title="Delete Route"
-                                                className="text-red-500"
-                                            >
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
-                                        </div>
-                                    </TableCell>
-                                </TableRow>
-                            ))
-                        )}
-                    </TableBody>
-                </Table>
-            </div>
-
-            {pagination.totalPages > 1 && (
-                <div className="flex items-center justify-between py-4">
-                    <div className="text-sm text-muted-foreground">
-                        Showing {filteredRoutes.length} of {pagination.totalItems} routes
-                    </div>
-                    <div className="flex items-center space-x-2">
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                            disabled={currentPage <= 1}
-                        >
-                            <ArrowLeft className="h-4 w-4 mr-2" />
-                            Previous
-                        </Button>
-                        <div className="text-sm">
-                            Page {pagination.currentPage} of {pagination.totalPages}
+            <Card>
+                <CardHeader>
+                    <CardTitle>Routes</CardTitle>
+                    <CardDescription>Manage all transportation routes in the system</CardDescription>
+                    <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                        <div className="relative w-full md:w-96">
+                            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                placeholder="Search routes..."
+                                className="pl-8 h-9"
+                                value={searchQuery}
+                                onChange={(e) => handleSearch(e.target.value)}
+                            />
                         </div>
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage((prev) => Math.min(prev + 1, pagination.totalPages))}
-                            disabled={currentPage >= pagination.totalPages}
-                        >
-                            Next
-                            <ArrowRight className="h-4 w-4 ml-2" />
-                        </Button>
+                        <div className="flex gap-2 w-full md:w-auto">
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="outline" size="sm">
+                                        <ChevronDown className="mr-2 h-4 w-4" />
+                                        Status:{" "}
+                                        {statusFilter.length === 0
+                                            ? "All"
+                                            : statusFilter.map((s) => s.charAt(0).toUpperCase() + s.slice(1)).join(", ")}
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuCheckboxItem
+                                        checked={statusFilter.includes("active")}
+                                        onCheckedChange={() => toggleStatusFilter("active")}
+                                    >
+                                        Active
+                                    </DropdownMenuCheckboxItem>
+                                    <DropdownMenuCheckboxItem
+                                        checked={statusFilter.includes("inactive")}
+                                        onCheckedChange={() => toggleStatusFilter("inactive")}
+                                    >
+                                        Inactive
+                                    </DropdownMenuCheckboxItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        </div>
                     </div>
-                </div>
-            )}
+                </CardHeader>
+                <CardContent>
+                    <div className="rounded-md border">
+                        <Table>
+                            <TableHeader>
+                                <TableRow>
+                                    <TableHead>Name</TableHead>
+                                    <TableHead>Start Point</TableHead>
+                                    <TableHead>End Point</TableHead>
+                                    <TableHead>Distance</TableHead>
+                                    <TableHead>Est. Time</TableHead>
+                                    <TableHead>Fare</TableHead>
+                                    <TableHead>Status</TableHead>
+                                    <TableHead>Actions</TableHead>
+                                </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                                {routes.length === 0 ? (
+                                    <TableRow>
+                                        <TableCell colSpan={8} className="h-24 text-center">
+                                            No routes found.
+                                        </TableCell>
+                                    </TableRow>
+                                ) : (
+                                    routes.map((route: Route) => (
+                                        <TableRow key={route.id}>
+                                            <TableCell className="font-medium">{route.name}</TableCell>
+                                            <TableCell>
+                                                {isLoadingBusStops ? <Skeleton className="h-4 w-20" /> : getBusStopName(route.start_point_id)}
+                                            </TableCell>
+                                            <TableCell>
+                                                {isLoadingBusStops ? <Skeleton className="h-4 w-20" /> : getBusStopName(route.end_point_id)}
+                                            </TableCell>
+                                            <TableCell>{route.distance} km</TableCell>
+                                            <TableCell>{route.estimated_journey_hours} hr</TableCell>
+                                            <TableCell>{safeAmount(route.fare)}</TableCell>
+                                            <TableCell>
+                                                <Badge variant="outline" className={getStatusColor(route.is_active)}>
+                                                    {route.is_active ? (
+                                                        <>
+                                                            <Check className="h-3 w-3 mr-1" />
+                                                            Active
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <X className="h-3 w-3 mr-1" />
+                                                            Inactive
+                                                        </>
+                                                    )}
+                                                </Badge>
+                                            </TableCell>
+                                            <TableCell>
+                                                <div className="flex space-x-2">
+                                                    <Button variant="ghost" size="sm" onClick={() => handleViewRoute(route)}>
+                                                        <Eye className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button variant="ghost" size="sm" onClick={() => handleAddEdit(route)}>
+                                                        <Edit className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button variant="ghost" size="sm" onClick={() => handleDeleteDialog(route)}>
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                </div>
+                                            </TableCell>
+                                        </TableRow>
+                                    ))
+                                )}
+                            </TableBody>
+                        </Table>
+                    </div>
 
+                    {/* Server-side Pagination */}
+                    {pagination.totalPages > 1 && (
+                        <div className="flex items-center justify-between space-x-2 py-4">
+                            <div className="text-sm text-muted-foreground">
+                                Showing {pagination.from} to {pagination.to} of {pagination.totalItems} routes
+                            </div>
+                            <div className="flex items-center space-x-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setCurrentPage(currentPage - 1)}
+                                    disabled={currentPage === 1}
+                                >
+                                    <ChevronLeft className="h-4 w-4" />
+                                    Previous
+                                </Button>
+                                <div className="flex items-center space-x-1">
+                                    {Array.from({ length: pagination.totalPages }, (_, i) => i + 1)
+                                        .filter((page) => {
+                                            return page === 1 || page === pagination.totalPages || Math.abs(page - currentPage) <= 1
+                                        })
+                                        .map((page, index, array) => (
+                                            <div key={page} className="flex items-center">
+                                                {index > 0 && array[index - 1] !== page - 1 && (
+                                                    <span className="px-2 text-muted-foreground">...</span>
+                                                )}
+                                                <Button
+                                                    variant={currentPage === page ? "default" : "outline"}
+                                                    size="sm"
+                                                    onClick={() => setCurrentPage(page)}
+                                                    className="w-8 h-8 p-0"
+                                                >
+                                                    {page}
+                                                </Button>
+                                            </div>
+                                        ))}
+                                </div>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setCurrentPage(currentPage + 1)}
+                                    disabled={currentPage === pagination.totalPages}
+                                >
+                                    Next
+                                    <ChevronRight className="h-4 w-4" />
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
+
+            {/* Keep all the existing dialogs unchanged */}
             {/* View Route Dialog */}
             <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
                 <DialogContent className="sm:max-w-[600px]">
@@ -754,7 +809,11 @@ export default function RoutesPage() {
                     </DialogHeader>
                     {isLoadingRouteDetails ? (
                         <div className="py-6 flex items-center justify-center">
-                            <LoadingSpinner />
+                            <div className="space-y-2">
+                                <Skeleton className="h-4 w-full" />
+                                <Skeleton className="h-4 w-3/4" />
+                                <Skeleton className="h-4 w-1/2" />
+                            </div>
                         </div>
                     ) : viewingRoute ? (
                         <div className="py-4">
@@ -785,17 +844,13 @@ export default function RoutesPage() {
                                     <div className="grid grid-cols-2 gap-4">
                                         <div>
                                             <h4 className="text-sm font-medium mb-1">Fare</h4>
-                                            <p className="text-sm">{viewingRoute.fare.toLocaleString()} TZS</p>
+                                            <p className="text-sm">{safeAmount(viewingRoute.fare)}</p>
                                         </div>
                                         <div>
                                             <h4 className="text-sm font-medium mb-1">Status</h4>
-                                            <span
-                                                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                                                    viewingRoute.is_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"
-                                                }`}
-                                            >
-                        {viewingRoute.is_active ? "Active" : "Inactive"}
-                      </span>
+                                            <Badge variant="outline" className={getStatusColor(viewingRoute.is_active)}>
+                                                {viewingRoute.is_active ? "Active" : "Inactive"}
+                                            </Badge>
                                         </div>
                                     </div>
 
@@ -918,8 +973,7 @@ export default function RoutesPage() {
                                         <SelectContent>
                                             {isLoadingBusStops ? (
                                                 <div className="flex items-center justify-center py-2">
-                                                    <LoadingSpinner size="sm" className="mr-2" />
-                                                    <span>Loading bus stops...</span>
+                                                    <Skeleton className="h-4 w-20" />
                                                 </div>
                                             ) : isErrorBusStops ? (
                                                 <div className="text-center py-2 text-red-500">Failed to load bus stops</div>
@@ -951,8 +1005,7 @@ export default function RoutesPage() {
                                         <SelectContent>
                                             {isLoadingBusStops ? (
                                                 <div className="flex items-center justify-center py-2">
-                                                    <LoadingSpinner size="sm" className="mr-2" />
-                                                    <span>Loading bus stops...</span>
+                                                    <Skeleton className="h-4 w-20" />
                                                 </div>
                                             ) : isErrorBusStops ? (
                                                 <div className="text-center py-2 text-red-500">Failed to load bus stops</div>
@@ -1070,7 +1123,7 @@ export default function RoutesPage() {
                             <Button type="submit" disabled={createRouteMutation.isPending || updateRouteMutation.isPending}>
                                 {createRouteMutation.isPending || updateRouteMutation.isPending ? (
                                     <>
-                                        <LoadingSpinner className="mr-2" size="sm" />
+                                        <Skeleton className="mr-2 h-4 w-4" />
                                         {selectedRoute ? "Updating..." : "Creating..."}
                                     </>
                                 ) : selectedRoute ? (
@@ -1102,7 +1155,7 @@ export default function RoutesPage() {
                         >
                             {deleteRouteMutation.isPending ? (
                                 <>
-                                    <LoadingSpinner className="mr-2" size="sm" />
+                                    <Skeleton className="mr-2 h-4 w-4" />
                                     Deleting...
                                 </>
                             ) : (

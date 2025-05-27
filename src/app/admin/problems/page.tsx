@@ -1,13 +1,16 @@
 "use client"
 
+import { CardDescription } from "@/components/ui/card"
+
 import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { PageHeader } from "@/components/page-header"
-import { TableFilters } from "@/components/table-filters"
-import { TablePagination } from "@/components/table-pagination"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { LoadingSpinner } from "@/components/loading-spinner"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
     Plus,
     Download,
@@ -20,8 +23,11 @@ import {
     Edit,
     Trash2,
     UserPlus,
+    Search,
+    ChevronDown,
+    ArrowLeft,
+    ArrowRight,
 } from "lucide-react"
-import { motion } from "framer-motion"
 import { useToast } from "@/components/ui/use-toast"
 import {
     Dialog,
@@ -35,6 +41,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import {
+    DropdownMenu,
+    DropdownMenuCheckboxItem,
+    DropdownMenuContent,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import {
     AlertDialog,
     AlertDialogAction,
     AlertDialogCancel,
@@ -44,7 +56,6 @@ import {
     AlertDialogHeader,
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
 import {
     getProblems,
@@ -60,10 +71,12 @@ import type { Problem, CreateProblemData, UpdateProblemStatusData, AssignProblem
 export default function ProblemsPage() {
     const { toast } = useToast()
     const queryClient = useQueryClient()
+
+    // State for search, filters, and pagination
+    const [searchQuery, setSearchQuery] = useState("")
+    const [statusFilter, setStatusFilter] = useState<string[]>([])
     const [currentPage, setCurrentPage] = useState(1)
-    const [pageSize, setPageSize] = useState(10)
-    const [searchTerm, setSearchTerm] = useState("")
-    const [filters, setFilters] = useState<Record<string, any>>({})
+    const [pageSize] = useState(10)
 
     // Dialog states
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false)
@@ -78,19 +91,26 @@ export default function ProblemsPage() {
     const [newStatus, setNewStatus] = useState<string>("")
     const [assigneeId, setAssigneeId] = useState<number | null>(null)
 
-    // Fetch problems
+    // Fetch all problems for statistics (no pagination)
+    const { data: allProblemsData, isLoading: isLoadingAllProblems } = useQuery({
+        queryKey: ["allProblems"],
+        queryFn: () => getProblems({ paginate: false }),
+    })
+
+    // Fetch problems with pagination for table display
     const {
         data: problemsData,
         isLoading: isLoadingProblems,
         isError: isErrorProblems,
         refetch: refetchProblems,
     } = useQuery({
-        queryKey: ["problems", currentPage, pageSize, searchTerm, filters],
+        queryKey: ["problems", currentPage, pageSize, searchQuery, statusFilter],
         queryFn: () =>
             getProblems({
                 page: currentPage,
                 per_page: pageSize,
-                status: filters.status,
+                search: searchQuery,
+                status: statusFilter.length === 1 ? statusFilter[0] : undefined,
                 paginate: true,
             }),
     })
@@ -121,6 +141,7 @@ export default function ProblemsPage() {
         mutationFn: (data: CreateProblemData) => createProblem(data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["problems"] })
+            queryClient.invalidateQueries({ queryKey: ["allProblems"] })
             toast({
                 title: "Problem reported",
                 description: "The problem has been reported successfully.",
@@ -142,6 +163,7 @@ export default function ProblemsPage() {
         mutationFn: ({ id, data }: { id: number; data: UpdateProblemStatusData }) => updateProblemStatus(id, data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["problems"] })
+            queryClient.invalidateQueries({ queryKey: ["allProblems"] })
             queryClient.invalidateQueries({ queryKey: ["problem", selectedProblem?.id] })
             toast({
                 title: "Status updated",
@@ -163,6 +185,7 @@ export default function ProblemsPage() {
         mutationFn: ({ id, data }: { id: number; data: AssignProblemData }) => assignProblem(id, data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["problems"] })
+            queryClient.invalidateQueries({ queryKey: ["allProblems"] })
             queryClient.invalidateQueries({ queryKey: ["problem", selectedProblem?.id] })
             toast({
                 title: "Problem assigned",
@@ -184,6 +207,7 @@ export default function ProblemsPage() {
         mutationFn: (id: number) => deleteProblem(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["problems"] })
+            queryClient.invalidateQueries({ queryKey: ["allProblems"] })
             toast({
                 title: "Problem deleted",
                 description: "The problem has been deleted successfully.",
@@ -201,29 +225,45 @@ export default function ProblemsPage() {
 
     // Extract problems and pagination data
     const problems = problemsData?.data?.data || []
-    const totalPages = problemsData?.data?.last_page || 1
-    const totalItems = problemsData?.data?.total || 0
+    const pagination = {
+        currentPage: problemsData?.data?.current_page || problemsData?.meta?.current_page || 1,
+        totalPages: problemsData?.data?.last_page || problemsData?.meta?.last_page || 1,
+        totalItems: problemsData?.data?.total || problemsData?.meta?.total || 0,
+        perPage: problemsData?.data?.per_page || problemsData?.meta?.per_page || 10,
+        from: problemsData?.data?.from || problemsData?.meta?.from || 0,
+        to: problemsData?.data?.to || problemsData?.meta?.to || 0,
+    }
+
+    // Extract all problems for statistics
+    const allProblems = Array.isArray(allProblemsData?.data)
+        ? allProblemsData.data
+        : Array.isArray(allProblemsData?.data?.data)
+            ? allProblemsData.data.data
+            : []
 
     // Extract users for assignee selection
     const users = usersData?.data?.data || []
 
-    // Calculate stats
+    // Calculate stats from all problems
     const stats = {
-        total: totalItems,
-        open: problems.filter((p) => p.status === "open").length,
-        inProgress: problems.filter((p) => p.status === "in_progress").length,
-        resolved: problems.filter((p) => p.status === "resolved").length,
-        closed: problems.filter((p) => p.status === "closed").length,
+        total: allProblems?.length || 0,
+        open: allProblems?.filter((p) => p.status === "open")?.length || 0,
+        inProgress: allProblems?.filter((p) => p.status === "in_progress")?.length || 0,
+        resolved: allProblems?.filter((p) => p.status === "resolved")?.length || 0,
+        closed: allProblems?.filter((p) => p.status === "closed")?.length || 0,
     }
 
     const handleSearch = (term: string) => {
-        setSearchTerm(term)
+        setSearchQuery(term)
         setCurrentPage(1)
     }
 
-    const handleFilterChange = (newFilters: any) => {
-        setFilters(newFilters)
-        setCurrentPage(1)
+    const toggleStatusFilter = (status: string) => {
+        setStatusFilter((current) => {
+            const newFilter = current.includes(status) ? current.filter((s) => s !== status) : [...current, status]
+            setCurrentPage(1) // Reset to first page when filter changes
+            return newFilter
+        })
     }
 
     const handleCreateProblem = () => {
@@ -325,245 +365,291 @@ export default function ProblemsPage() {
     const getStatusColor = (status: string) => {
         switch (status) {
             case "open":
-                return "bg-red-100 text-red-800"
+                return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
             case "in_progress":
-                return "bg-yellow-100 text-yellow-800"
+                return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300"
             case "resolved":
-                return "bg-green-100 text-green-800"
+                return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300"
             case "closed":
-                return "bg-gray-100 text-gray-800"
+                return "bg-gray-100 text-gray-800 dark:bg-gray-900 dark:text-gray-300"
             default:
-                return "bg-red-100 text-red-800"
+                return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-300"
         }
     }
 
-    const filterOptions = [
-        {
-            id: "status",
-            label: "Status",
-            type: "select",
-            options: [
-                { value: "open", label: "Open" },
-                { value: "in_progress", label: "In Progress" },
-                { value: "resolved", label: "Resolved" },
-                { value: "closed", label: "Closed" },
-            ],
-        },
-    ]
-
-    const problemsDataExists = problemsData?.data?.data !== undefined
-
     return (
-        <div className="container mx-auto p-6 space-y-6">
-            <PageHeader
-                title="Problems Management"
-                description="Track and resolve reported issues in the system"
-                actions={
-                    <div className="flex items-center gap-2">
-                        <Button variant="outline" size="sm" onClick={() => refetchProblems()}>
-                            <RefreshCw className="h-4 w-4 mr-2" />
-                            Refresh
-                        </Button>
-                        <Button variant="outline" size="sm">
-                            <Download className="h-4 w-4 mr-2" />
-                            Export
-                        </Button>
-                        <Button size="sm" onClick={() => setIsCreateDialogOpen(true)}>
-                            <Plus className="h-4 w-4 mr-2" />
-                            Report Problem
-                        </Button>
-                    </div>
-                }
-            />
+        <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+            <div className="flex items-center justify-between space-y-2">
+                <h2 className="text-3xl font-bold tracking-tight">Problems Management</h2>
+                <div className="flex items-center space-x-2">
+                    <Button variant="outline" onClick={() => refetchProblems()}>
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Refresh
+                    </Button>
+                    <Button variant="outline" size="sm">
+                        <Download className="h-4 w-4 mr-2" />
+                        Export
+                    </Button>
+                    <Button onClick={() => setIsCreateDialogOpen(true)}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Report Problem
+                    </Button>
+                </div>
+            </div>
 
             {/* Stats Cards */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                 <Card>
-                    <CardHeader className="pb-2">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Total Problems</CardTitle>
+                        <AlertTriangle className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">{stats.total}</div>
+                        {isLoadingAllProblems ? (
+                            <Skeleton className="h-8 w-20" />
+                        ) : (
+                            <div className="text-2xl font-bold">{stats.total}</div>
+                        )}
                         <p className="text-xs text-muted-foreground">All reported issues</p>
                     </CardContent>
                 </Card>
                 <Card>
-                    <CardHeader className="pb-2">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Open</CardTitle>
+                        <AlertTriangle className="h-4 w-4 text-red-500" />
                     </CardHeader>
                     <CardContent>
-                        <div className="flex items-center">
-                            <AlertTriangle className="h-4 w-4 mr-2 text-red-500" />
+                        {isLoadingAllProblems ? (
+                            <Skeleton className="h-8 w-20" />
+                        ) : (
                             <div className="text-2xl font-bold">{stats.open}</div>
-                        </div>
+                        )}
                         <p className="text-xs text-muted-foreground">Awaiting action</p>
                     </CardContent>
                 </Card>
                 <Card>
-                    <CardHeader className="pb-2">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">In Progress</CardTitle>
+                        <Clock className="h-4 w-4 text-yellow-500" />
                     </CardHeader>
                     <CardContent>
-                        <div className="flex items-center">
-                            <Clock className="h-4 w-4 mr-2 text-yellow-500" />
+                        {isLoadingAllProblems ? (
+                            <Skeleton className="h-8 w-20" />
+                        ) : (
                             <div className="text-2xl font-bold">{stats.inProgress}</div>
-                        </div>
+                        )}
                         <p className="text-xs text-muted-foreground">Currently being addressed</p>
                     </CardContent>
                 </Card>
                 <Card>
-                    <CardHeader className="pb-2">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Resolved</CardTitle>
+                        <CheckCircle className="h-4 w-4 text-green-500" />
                     </CardHeader>
                     <CardContent>
-                        <div className="flex items-center">
-                            <CheckCircle className="h-4 w-4 mr-2 text-green-500" />
+                        {isLoadingAllProblems ? (
+                            <Skeleton className="h-8 w-20" />
+                        ) : (
                             <div className="text-2xl font-bold">{stats.resolved}</div>
-                        </div>
+                        )}
                         <p className="text-xs text-muted-foreground">Successfully fixed</p>
                     </CardContent>
                 </Card>
                 <Card>
-                    <CardHeader className="pb-2">
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Closed</CardTitle>
+                        <XCircle className="h-4 w-4 text-gray-500" />
                     </CardHeader>
                     <CardContent>
-                        <div className="flex items-center">
-                            <XCircle className="h-4 w-4 mr-2 text-gray-500" />
+                        {isLoadingAllProblems ? (
+                            <Skeleton className="h-8 w-20" />
+                        ) : (
                             <div className="text-2xl font-bold">{stats.closed}</div>
-                        </div>
+                        )}
                         <p className="text-xs text-muted-foreground">Permanently closed</p>
                     </CardContent>
                 </Card>
             </div>
 
-            <TableFilters
-                onSearch={handleSearch}
-                onFilterChange={handleFilterChange}
-                filterOptions={filterOptions}
-                searchPlaceholder="Search problems..."
-            />
-
-            {isLoadingProblems ? (
-                <div className="flex justify-center items-center h-64">
-                    <LoadingSpinner size="lg" />
-                </div>
-            ) : isErrorProblems ? (
-                <div className="flex justify-center items-center h-64 text-red-500">
-                    Error loading problems. Please try again.
-                </div>
-            ) : (
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.3 }}
-                    className="bg-white rounded-lg shadow overflow-hidden"
-                >
-                    <div className="overflow-x-auto">
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>ID</TableHead>
-                                    <TableHead>Problem</TableHead>
-                                    <TableHead>Reported By</TableHead>
-                                    <TableHead>Assigned To</TableHead>
-                                    <TableHead>Created</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead>Actions</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {problems.length === 0 && problemsDataExists ? (
+            <Card>
+                <CardHeader>
+                    <CardTitle>Problems</CardTitle>
+                    <CardDescription>Track and resolve reported issues in the system</CardDescription>
+                    <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                        <div className="relative w-full md:w-96">
+                            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                placeholder="Search problems..."
+                                className="pl-8"
+                                value={searchQuery}
+                                onChange={(e) => handleSearch(e.target.value)}
+                            />
+                        </div>
+                        <div className="flex gap-2 w-full md:w-auto">
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="outline" size="sm">
+                                        <ChevronDown className="mr-2 h-4 w-4" />
+                                        Status:{" "}
+                                        {statusFilter.length === 0
+                                            ? "All"
+                                            : statusFilter.map((s) => s.charAt(0).toUpperCase() + s.slice(1).replace("_", " ")).join(", ")}
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuCheckboxItem
+                                        checked={statusFilter.includes("open")}
+                                        onCheckedChange={() => toggleStatusFilter("open")}
+                                    >
+                                        Open
+                                    </DropdownMenuCheckboxItem>
+                                    <DropdownMenuCheckboxItem
+                                        checked={statusFilter.includes("in_progress")}
+                                        onCheckedChange={() => toggleStatusFilter("in_progress")}
+                                    >
+                                        In Progress
+                                    </DropdownMenuCheckboxItem>
+                                    <DropdownMenuCheckboxItem
+                                        checked={statusFilter.includes("resolved")}
+                                        onCheckedChange={() => toggleStatusFilter("resolved")}
+                                    >
+                                        Resolved
+                                    </DropdownMenuCheckboxItem>
+                                    <DropdownMenuCheckboxItem
+                                        checked={statusFilter.includes("closed")}
+                                        onCheckedChange={() => toggleStatusFilter("closed")}
+                                    >
+                                        Closed
+                                    </DropdownMenuCheckboxItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                            <Button variant="outline" size="sm">
+                                <Download className="mr-2 h-4 w-4" />
+                                Export
+                            </Button>
+                        </div>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    {isLoadingProblems ? (
+                        <div className="space-y-2">
+                            {Array.from({ length: 5 }).map((_, index) => (
+                                <div key={index} className="flex space-x-4">
+                                    <Skeleton className="h-12 w-full" />
+                                </div>
+                            ))}
+                        </div>
+                    ) : isErrorProblems ? (
+                        <div className="flex justify-center items-center h-64 text-red-500">
+                            Error loading problems. Please try again.
+                        </div>
+                    ) : (
+                        <div className="rounded-md border">
+                            <Table>
+                                <TableHeader>
                                     <TableRow>
-                                        <TableCell colSpan={7} className="text-center py-8">
-                                            No problems found
-                                        </TableCell>
+                                        <TableHead>Problem</TableHead>
+                                        <TableHead>Reported By</TableHead>
+                                        <TableHead>Assigned To</TableHead>
+                                        <TableHead>Created</TableHead>
+                                        <TableHead>Status</TableHead>
+                                        <TableHead>Actions</TableHead>
                                     </TableRow>
-                                ) : (
-                                    problems.map((problem: Problem) => (
-                                        <TableRow key={problem.id}>
-                                            <TableCell>{problem.id}</TableCell>
-                                            <TableCell className="font-medium">
-                                                {problem.description.length > 50
-                                                    ? `${problem.description.substring(0, 50)}...`
-                                                    : problem.description}
-                                            </TableCell>
-                                            <TableCell>
-                                                {problem.reporter ? `${problem.reporter.first_name} ${problem.reporter.last_name}` : "Unknown"}
-                                            </TableCell>
-                                            <TableCell>
-                                                {problem.assignee
-                                                    ? `${problem.assignee.first_name} ${problem.assignee.last_name}`
-                                                    : "Unassigned"}
-                                            </TableCell>
-                                            <TableCell>{new Date(problem.created_at).toLocaleString()}</TableCell>
-                                            <TableCell>
-                                                <div className="flex items-center">
-                                                    {getStatusIcon(problem.status)}
-                                                    <span
-                                                        className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(problem.status)}`}
-                                                    >
-                            {problem.status.charAt(0).toUpperCase() + problem.status.slice(1).replace("_", " ")}
-                          </span>
-                                                </div>
-                                            </TableCell>
-                                            <TableCell>
-                                                <div className="flex items-center gap-2">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        onClick={() => openViewDialog(problem)}
-                                                        title="View Details"
-                                                    >
-                                                        <Eye className="h-4 w-4" />
-                                                    </Button>
-                                                    {problem.status !== "closed" && (
-                                                        <>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                onClick={() => openStatusDialog(problem)}
-                                                                title="Update Status"
-                                                            >
-                                                                <Edit className="h-4 w-4" />
-                                                            </Button>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                onClick={() => openAssignDialog(problem)}
-                                                                title="Assign Problem"
-                                                            >
-                                                                <UserPlus className="h-4 w-4" />
-                                                            </Button>
-                                                        </>
-                                                    )}
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        onClick={() => openDeleteDialog(problem)}
-                                                        className="text-red-500 hover:text-red-700"
-                                                        title="Delete Problem"
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                </div>
+                                </TableHeader>
+                                <TableBody>
+                                    {problems.length === 0 ? (
+                                        <TableRow>
+                                            <TableCell colSpan={6} className="h-24 text-center">
+                                                No problems found.
                                             </TableCell>
                                         </TableRow>
-                                    ))
-                                )}
-                            </TableBody>
-                        </Table>
-                    </div>
+                                    ) : (
+                                        problems.map((problem: Problem) => (
+                                            <TableRow key={problem.id}>
+                                                <TableCell className="font-medium">
+                                                    {problem.description.length > 50
+                                                        ? `${problem.description.substring(0, 50)}...`
+                                                        : problem.description}
+                                                </TableCell>
+                                                <TableCell>
+                                                    {problem.reporter
+                                                        ? `${problem.reporter.first_name} ${problem.reporter.last_name}`
+                                                        : "Unknown"}
+                                                </TableCell>
+                                                <TableCell>
+                                                    {problem.assignee
+                                                        ? `${problem.assignee.first_name} ${problem.assignee.last_name}`
+                                                        : "Unassigned"}
+                                                </TableCell>
+                                                <TableCell>{new Date(problem.created_at).toLocaleString()}</TableCell>
+                                                <TableCell>
+                                                    <div className="flex items-center">
+                                                        <Badge variant="outline" className={getStatusColor(problem.status)}>
+                                                            {getStatusIcon(problem.status)}
+                                                            {problem.status.charAt(0).toUpperCase() + problem.status.slice(1).replace("_", " ")}
+                                                        </Badge>
+                                                    </div>
+                                                </TableCell>
+                                                <TableCell>
+                                                    <div className="flex gap-2">
+                                                        <Button variant="ghost" size="sm" onClick={() => openViewDialog(problem)}>
+                                                            <Eye className="h-4 w-4" />
+                                                        </Button>
+                                                        {problem.status !== "closed" && (
+                                                            <>
+                                                                <Button variant="ghost" size="sm" onClick={() => openStatusDialog(problem)}>
+                                                                    <Edit className="h-4 w-4" />
+                                                                </Button>
+                                                                <Button variant="ghost" size="sm" onClick={() => openAssignDialog(problem)}>
+                                                                    <UserPlus className="h-4 w-4" />
+                                                                </Button>
+                                                            </>
+                                                        )}
+                                                        <Button variant="ghost" size="sm" onClick={() => openDeleteDialog(problem)}>
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    )}
+                </CardContent>
+            </Card>
 
-                    <TablePagination
-                        currentPage={currentPage}
-                        totalPages={totalPages}
-                        onPageChange={setCurrentPage}
-                        pageSize={pageSize}
-                        onPageSizeChange={setPageSize}
-                        totalItems={totalItems}
-                    />
-                </motion.div>
+            {/* Pagination */}
+            {pagination.totalPages > 1 && (
+                <div className="flex items-center justify-between py-4">
+                    <div className="text-sm text-muted-foreground">
+                        Showing {pagination.from} to {pagination.to} of {pagination.totalItems} problems
+                    </div>
+                    <div className="flex items-center space-x-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                            disabled={currentPage <= 1}
+                        >
+                            <ArrowLeft className="h-4 w-4 mr-2" />
+                            Previous
+                        </Button>
+                        <div className="text-sm">
+                            Page {pagination.currentPage} of {pagination.totalPages}
+                        </div>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCurrentPage((prev) => Math.min(prev + 1, pagination.totalPages))}
+                            disabled={currentPage >= pagination.totalPages}
+                        >
+                            Next
+                            <ArrowRight className="h-4 w-4 ml-2" />
+                        </Button>
+                    </div>
+                </div>
             )}
 
             {/* Create Problem Dialog */}
@@ -628,15 +714,11 @@ export default function ProblemsPage() {
                                 <div>
                                     <h3 className="text-sm font-medium text-gray-500">Status</h3>
                                     <div className="flex items-center mt-1">
-                                        {getStatusIcon(problemDetails.data.status)}
-                                        <span
-                                            className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(
-                                                problemDetails.data.status,
-                                            )}`}
-                                        >
-                      {problemDetails.data.status.charAt(0).toUpperCase() +
-                          problemDetails.data.status.slice(1).replace("_", " ")}
-                    </span>
+                                        <Badge variant="outline" className={getStatusColor(problemDetails.data.status)}>
+                                            {getStatusIcon(problemDetails.data.status)}
+                                            {problemDetails.data.status.charAt(0).toUpperCase() +
+                                                problemDetails.data.status.slice(1).replace("_", " ")}
+                                        </Badge>
                                     </div>
                                 </div>
                                 <div>

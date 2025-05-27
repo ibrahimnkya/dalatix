@@ -1,7 +1,19 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Calendar, Search, Ticket, Eye, RefreshCcw, MapPin, Clock, User, Truck } from "lucide-react"
+import {
+    Calendar,
+    Search,
+    Ticket,
+    Eye,
+    RefreshCcw,
+    MapPin,
+    Clock,
+    User,
+    Truck,
+    ChevronLeft,
+    ChevronRight,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -24,6 +36,8 @@ import { Calendar as CalendarComponent } from "@/components/ui/calendar"
 import { getBookingsByDateRange, getBooking, updateBookingStatus } from "@/lib/services/booking"
 import type { Booking } from "@/types/booking"
 
+const ITEMS_PER_PAGE = 10
+
 export default function BookingsPage() {
     const [bookings, setBookings] = useState<Booking[]>([])
     const [loading, setLoading] = useState(true)
@@ -33,6 +47,7 @@ export default function BookingsPage() {
     const [statusDialogOpen, setStatusDialogOpen] = useState(false)
     const [newStatus, setNewStatus] = useState<string>("")
     const [statusLoading, setStatusLoading] = useState(false)
+    const [currentPage, setCurrentPage] = useState(1)
     const [dateRange, setDateRange] = useState<{ from: Date; to: Date }>({
         from: new Date(new Date().setDate(new Date().getDate() - 30)), // Default to last 30 days
         to: new Date(),
@@ -44,6 +59,11 @@ export default function BookingsPage() {
     useEffect(() => {
         fetchBookings()
     }, [dateRange])
+
+    // Reset to first page when search query changes
+    useEffect(() => {
+        setCurrentPage(1)
+    }, [searchQuery])
 
     const fetchBookings = async () => {
         setLoading(true)
@@ -132,17 +152,39 @@ export default function BookingsPage() {
         setStatusDialogOpen(true)
     }
 
-    // Safely count bookings with a specific status
-    const countBookingsByStatus = (status: string): number => {
-        if (!Array.isArray(bookings)) return 0
-        return bookings.filter((booking) => booking?.status === status).length
+    // Calculate actual booking statistics
+    const getBookingStats = () => {
+        if (!Array.isArray(bookings)) return { total: 0, active: 0, used: 0, cancelled: 0, deactivated: 0 }
+
+        return bookings.reduce(
+            (stats, booking) => {
+                if (!booking) return stats
+
+                stats.total++
+
+                if (booking.used) {
+                    stats.used++
+                } else {
+                    switch (booking.status) {
+                        case "active":
+                            stats.active++
+                            break
+                        case "cancelled":
+                            stats.cancelled++
+                            break
+                        case "deactivated":
+                            stats.deactivated++
+                            break
+                    }
+                }
+
+                return stats
+            },
+            { total: 0, active: 0, used: 0, cancelled: 0, deactivated: 0 },
+        )
     }
 
-    // Safely count used bookings
-    const countUsedBookings = (): number => {
-        if (!Array.isArray(bookings)) return 0
-        return bookings.filter((booking) => booking?.used === true).length
-    }
+    const stats = getBookingStats()
 
     // Add defensive checks before accessing properties
     const filteredBookings = Array.isArray(bookings)
@@ -167,12 +209,20 @@ export default function BookingsPage() {
         })
         : []
 
-    const getStatusColor = (status: string) => {
+    // Pagination logic
+    const totalPages = Math.ceil(filteredBookings.length / ITEMS_PER_PAGE)
+    const startIndex = (currentPage - 1) * ITEMS_PER_PAGE
+    const endIndex = startIndex + ITEMS_PER_PAGE
+    const paginatedBookings = filteredBookings.slice(startIndex, endIndex)
+
+    const getStatusColor = (status: string, used = false) => {
+        if (used) {
+            return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100"
+        }
+
         switch (status) {
             case "active":
                 return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
-            case "user":
-                return "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100"
             case "cancelled":
                 return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100"
             case "deactivated":
@@ -180,6 +230,31 @@ export default function BookingsPage() {
             default:
                 return "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100"
         }
+    }
+
+    const getStatusText = (booking: Booking) => {
+        if (booking.used) return "Used"
+        return booking.status?.charAt(0).toUpperCase() + (booking.status?.slice(1) || "")
+    }
+
+    const getScanningStatus = (booking: Booking) => {
+        if (!booking.vehicle) return "Not Scanned In"
+        if (!booking.scanned_in_at) return "Not Boarded"
+        if (!booking.scanned_out_at) return "Not Dropped"
+        return "Completed"
+    }
+
+    const getScanningStatusColor = (booking: Booking) => {
+        if (!booking.vehicle || !booking.scanned_in_at)
+            return "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100"
+        if (!booking.scanned_out_at) return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100"
+        return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
+    }
+
+    const getTotalFare = (booking: Booking) => {
+        const fare = Number(booking.fare) || 0
+        const parcelFare = booking.has_percel ? Number(booking.percel_fare) || 0 : 0
+        return fare + parcelFare
     }
 
     // Helper function to safely access booking properties
@@ -248,18 +323,14 @@ export default function BookingsPage() {
                 </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Total Bookings</CardTitle>
                         <Ticket className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                        {loading ? (
-                            <Skeleton className="h-8 w-20" />
-                        ) : (
-                            <div className="text-2xl font-bold">{Array.isArray(bookings) ? bookings.length : 0}</div>
-                        )}
+                        {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.total}</div>}
                     </CardContent>
                 </Card>
                 <Card>
@@ -268,11 +339,7 @@ export default function BookingsPage() {
                         <Ticket className="h-4 w-4 text-green-500" />
                     </CardHeader>
                     <CardContent>
-                        {loading ? (
-                            <Skeleton className="h-8 w-20" />
-                        ) : (
-                            <div className="text-2xl font-bold">{countBookingsByStatus("active")}</div>
-                        )}
+                        {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.active}</div>}
                     </CardContent>
                 </Card>
                 <Card>
@@ -281,11 +348,7 @@ export default function BookingsPage() {
                         <Ticket className="h-4 w-4 text-blue-500" />
                     </CardHeader>
                     <CardContent>
-                        {loading ? (
-                            <Skeleton className="h-8 w-20" />
-                        ) : (
-                            <div className="text-2xl font-bold">{countUsedBookings()}</div>
-                        )}
+                        {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.used}</div>}
                     </CardContent>
                 </Card>
                 <Card>
@@ -294,10 +357,19 @@ export default function BookingsPage() {
                         <Ticket className="h-4 w-4 text-red-500" />
                     </CardHeader>
                     <CardContent>
+                        {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.cancelled}</div>}
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Deactivated</CardTitle>
+                        <Ticket className="h-4 w-4 text-gray-500" />
+                    </CardHeader>
+                    <CardContent>
                         {loading ? (
                             <Skeleton className="h-8 w-20" />
                         ) : (
-                            <div className="text-2xl font-bold">{countBookingsByStatus("cancelled")}</div>
+                            <div className="text-2xl font-bold">{stats.deactivated}</div>
                         )}
                     </CardContent>
                 </Card>
@@ -330,61 +402,132 @@ export default function BookingsPage() {
                             ))}
                         </div>
                     ) : (
-                        <div className="rounded-md border">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Booking #</TableHead>
-                                        <TableHead>Passenger</TableHead>
-                                        <TableHead>Route</TableHead>
-                                        <TableHead>Vehicle</TableHead>
-                                        <TableHead>Fare</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead>Created</TableHead>
-                                        <TableHead>Actions</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {filteredBookings.length === 0 ? (
+                        <>
+                            <div className="rounded-md border">
+                                <Table>
+                                    <TableHeader>
                                         <TableRow>
-                                            <TableCell colSpan={8} className="h-24 text-center">
-                                                No bookings found.
-                                            </TableCell>
+                                            <TableHead>Booking #</TableHead>
+                                            <TableHead>AgentAttachment</TableHead>
+                                            <TableHead>Route</TableHead>
+                                            <TableHead>Vehicle</TableHead>
+                                            <TableHead>Fare</TableHead>
+                                            <TableHead>Status</TableHead>
+                                            <TableHead>Scanning Status</TableHead>
+                                            <TableHead>Created</TableHead>
+                                            <TableHead>Actions</TableHead>
                                         </TableRow>
-                                    ) : (
-                                        filteredBookings.map((booking) => (
-                                            <TableRow key={booking.id}>
-                                                <TableCell className="font-medium">{safeStr(booking.booking_number)}</TableCell>
-                                                <TableCell>{getFullName(booking.user)}</TableCell>
-                                                <TableCell>
-                                                    {booking.start_point?.name} → {booking.end_point?.name}
-                                                </TableCell>
-                                                <TableCell>{booking.vehicle?.name || "N/A"}</TableCell>
-                                                <TableCell>{safeAmount(booking.fare)}</TableCell>
-                                                <TableCell>
-                                                    <Badge variant="outline" className={getStatusColor(booking.status || "")}>
-                                                        {booking.used
-                                                            ? "Used"
-                                                            : safeStr(booking.status).charAt(0).toUpperCase() + safeStr(booking.status).slice(1)}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell>{safeDate(booking.created_at)}</TableCell>
-                                                <TableCell>
-                                                    <div className="flex space-x-2">
-                                                        <Button variant="ghost" size="sm" onClick={() => handleViewBooking(booking.id)}>
-                                                            <Eye className="h-4 w-4" />
-                                                        </Button>
-                                                        <Button variant="ghost" size="sm" onClick={() => openStatusDialog(booking)}>
-                                                            <RefreshCcw className="h-4 w-4" />
-                                                        </Button>
-                                                    </div>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {paginatedBookings.length === 0 ? (
+                                            <TableRow>
+                                                <TableCell colSpan={9} className="h-24 text-center">
+                                                    No bookings found.
                                                 </TableCell>
                                             </TableRow>
-                                        ))
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </div>
+                                        ) : (
+                                            paginatedBookings.map((booking) => (
+                                                <TableRow key={booking.id}>
+                                                    <TableCell className="font-medium">{safeStr(booking.booking_number)}</TableCell>
+                                                    <TableCell>{getFullName(booking.user)}</TableCell>
+                                                    <TableCell>
+                                                        {booking.start_point?.name} → {booking.end_point?.name}
+                                                    </TableCell>
+                                                    <TableCell>{booking.vehicle?.name || "N/A"}</TableCell>
+                                                    <TableCell>
+                                                        <div className="space-y-1">
+                                                            {booking.has_percel ? (
+                                                                <>
+                                                                    <div className="font-medium">{safeAmount(getTotalFare(booking))}</div>
+                                                                    <div className="text-xs text-muted-foreground">
+                                                                        Fare: {safeAmount(booking.fare)} + Parcel: {safeAmount(booking.percel_fare)}
+                                                                    </div>
+                                                                </>
+                                                            ) : (
+                                                                <div className="font-medium">{safeAmount(booking.fare)}</div>
+                                                            )}
+                                                        </div>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Badge variant="outline" className={getStatusColor(booking.status || "", booking.used)}>
+                                                            {getStatusText(booking)}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell>
+                                                        <Badge variant="outline" className={getScanningStatusColor(booking)}>
+                                                            {getScanningStatus(booking)}
+                                                        </Badge>
+                                                    </TableCell>
+                                                    <TableCell>{safeDate(booking.created_at)}</TableCell>
+                                                    <TableCell>
+                                                        <div className="flex space-x-2">
+                                                            <Button variant="ghost" size="sm" onClick={() => handleViewBooking(booking.id)}>
+                                                                <Eye className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button variant="ghost" size="sm" onClick={() => openStatusDialog(booking)}>
+                                                                <RefreshCcw className="h-4 w-4" />
+                                                            </Button>
+                                                        </div>
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </div>
+
+                            {/* Pagination */}
+                            {totalPages > 1 && (
+                                <div className="flex items-center justify-between space-x-2 py-4">
+                                    <div className="text-sm text-muted-foreground">
+                                        Showing {startIndex + 1} to {Math.min(endIndex, filteredBookings.length)} of{" "}
+                                        {filteredBookings.length} bookings
+                                    </div>
+                                    <div className="flex items-center space-x-2">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setCurrentPage(currentPage - 1)}
+                                            disabled={currentPage === 1}
+                                        >
+                                            <ChevronLeft className="h-4 w-4" />
+                                            Previous
+                                        </Button>
+                                        <div className="flex items-center space-x-1">
+                                            {Array.from({ length: totalPages }, (_, i) => i + 1)
+                                                .filter((page) => {
+                                                    // Show first page, last page, current page, and pages around current
+                                                    return page === 1 || page === totalPages || Math.abs(page - currentPage) <= 1
+                                                })
+                                                .map((page, index, array) => (
+                                                    <div key={page} className="flex items-center">
+                                                        {index > 0 && array[index - 1] !== page - 1 && (
+                                                            <span className="px-2 text-muted-foreground">...</span>
+                                                        )}
+                                                        <Button
+                                                            variant={currentPage === page ? "default" : "outline"}
+                                                            size="sm"
+                                                            onClick={() => setCurrentPage(page)}
+                                                            className="w-8 h-8 p-0"
+                                                        >
+                                                            {page}
+                                                        </Button>
+                                                    </div>
+                                                ))}
+                                        </div>
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setCurrentPage(currentPage + 1)}
+                                            disabled={currentPage === totalPages}
+                                        >
+                                            Next
+                                            <ChevronRight className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+                        </>
                     )}
                 </CardContent>
             </Card>
@@ -400,7 +543,7 @@ export default function BookingsPage() {
                         <div className="grid gap-4 py-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <h3 className="font-medium text-sm text-muted-foreground">Passenger Information</h3>
+                                    <h3 className="font-medium text-sm text-muted-foreground">AgentAttachment Information</h3>
                                     <div className="flex items-center mt-1">
                                         <User className="h-4 w-4 mr-2 text-muted-foreground" />
                                         <p className="font-semibold">{getFullName(selectedBooking.user)}</p>
@@ -410,18 +553,15 @@ export default function BookingsPage() {
                                 <div>
                                     <h3 className="font-medium text-sm text-muted-foreground">Booking Status</h3>
                                     <div className="flex space-x-2 items-center mt-1">
-                                        <Badge variant="outline" className={getStatusColor(selectedBooking.status || "")}>
-                                            {safeStr(selectedBooking.status).charAt(0).toUpperCase() +
-                                                safeStr(selectedBooking.status).slice(1)}
+                                        <Badge
+                                            variant="outline"
+                                            className={getStatusColor(selectedBooking.status || "", selectedBooking.used)}
+                                        >
+                                            {getStatusText(selectedBooking)}
                                         </Badge>
-                                        {selectedBooking.used && (
-                                            <Badge
-                                                variant="outline"
-                                                className="bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100"
-                                            >
-                                                Used
-                                            </Badge>
-                                        )}
+                                        <Badge variant="outline" className={getScanningStatusColor(selectedBooking)}>
+                                            {getScanningStatus(selectedBooking)}
+                                        </Badge>
                                     </div>
                                     {selectedBooking.cancelled_at && (
                                         <p className="mt-2 text-sm text-red-500">Cancelled at: {safeDate(selectedBooking.cancelled_at)}</p>
@@ -479,10 +619,18 @@ export default function BookingsPage() {
                                         <p className="font-medium text-lg">{safeAmount(selectedBooking.fare)}</p>
                                     </div>
                                     {selectedBooking.has_percel && (
-                                        <div>
-                                            <p className="text-sm text-muted-foreground">Parcel Fare</p>
-                                            <p className="font-medium">{safeAmount(selectedBooking.percel_fare)}</p>
-                                        </div>
+                                        <>
+                                            <div>
+                                                <p className="text-sm text-muted-foreground">Parcel Fare</p>
+                                                <p className="font-medium">{safeAmount(selectedBooking.percel_fare)}</p>
+                                            </div>
+                                            <div>
+                                                <p className="text-sm text-muted-foreground">Total Fare</p>
+                                                <p className="font-medium text-lg text-green-600">
+                                                    {safeAmount(getTotalFare(selectedBooking))}
+                                                </p>
+                                            </div>
+                                        </>
                                     )}
                                     <div>
                                         <p className="text-sm text-muted-foreground">Created At</p>
@@ -526,10 +674,11 @@ export default function BookingsPage() {
                     <div className="grid gap-4 py-4">
                         <div className="space-y-2">
                             <p className="text-sm font-medium">Current Status</p>
-                            <Badge variant="outline" className={selectedBooking ? getStatusColor(selectedBooking.status || "") : ""}>
-                                {selectedBooking
-                                    ? safeStr(selectedBooking.status).charAt(0).toUpperCase() + safeStr(selectedBooking.status).slice(1)
-                                    : ""}
+                            <Badge
+                                variant="outline"
+                                className={selectedBooking ? getStatusColor(selectedBooking.status || "", selectedBooking.used) : ""}
+                            >
+                                {selectedBooking ? getStatusText(selectedBooking) : ""}
                             </Badge>
                         </div>
                         <div className="space-y-2">
