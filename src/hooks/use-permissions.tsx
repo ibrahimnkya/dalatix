@@ -1,32 +1,38 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, type ReactNode } from "react"
+import { createContext, useState, useEffect, type ReactNode, useContext } from "react"
 
 interface PermissionsContextType {
     permissions: string[]
     roles: string[]
+    companyId: number | null
     hasPermission: (permission: string | string[]) => boolean
     hasRole: (role: string | string[]) => boolean
-    setUserPermissions: (permissions: string[], roles: string[]) => void
+    setUserPermissions: (permissions: string[], roles: string[], companyId?: number) => void
+    isBusOwner: () => boolean
 }
 
 const PermissionsContext = createContext<PermissionsContextType>({
     permissions: [],
     roles: [],
+    companyId: null,
     hasPermission: () => false,
     hasRole: () => false,
     setUserPermissions: () => {},
+    isBusOwner: () => false,
 })
 
 export function PermissionsProvider({ children }: { children: ReactNode }) {
     const [permissions, setPermissions] = useState<string[]>([])
     const [roles, setRoles] = useState<string[]>([])
+    const [companyId, setCompanyId] = useState<number | null>(null)
 
     // Attempt to load permissions from localStorage on mount
     useEffect(() => {
         try {
             const storedPermissions = localStorage.getItem("user_permissions")
             const storedRoles = localStorage.getItem("user_roles")
+            const storedCompanyId = localStorage.getItem("user_company_id")
 
             if (storedPermissions) {
                 setPermissions(JSON.parse(storedPermissions))
@@ -35,46 +41,58 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
             if (storedRoles) {
                 setRoles(JSON.parse(storedRoles))
             }
+
+            if (storedCompanyId) {
+                setCompanyId(Number.parseInt(storedCompanyId))
+            }
         } catch (error) {
             console.error("Error loading permissions from storage:", error)
         }
     }, [])
 
-    const hasPermission = (requiredPermission: string | string[]): boolean => {
-        if (!permissions.length) return false
-
-        if (Array.isArray(requiredPermission)) {
-            // For array input, check if user has ANY of the permissions (OR logic)
-            return requiredPermission.some((perm) => permissions.includes(perm))
-        }
-
-        // For string input, directly check if permission exists
-        return permissions.includes(requiredPermission)
+    const isBusOwner = (): boolean => {
+        return roles.includes("Bus Owner")
     }
 
-    const hasRole = (requiredRole: string | string[]): boolean => {
-        if (!roles.length) return false
-
-        if (Array.isArray(requiredRole)) {
-            // For array input, check if user has ANY of the roles (OR logic)
-            return requiredRole.some((role) => roles.includes(role))
-        }
-
-        // For string input, directly check if role exists
-        return roles.includes(requiredRole)
-    }
-
-    const setUserPermissions = (newPermissions: string[], newRoles: string[]) => {
+    const setUserPermissions = (newPermissions: string[], newRoles: string[], newCompanyId?: number) => {
         setPermissions(newPermissions)
         setRoles(newRoles)
+        if (newCompanyId) {
+            setCompanyId(newCompanyId)
+        }
 
         // Store in localStorage for persistence
         try {
             localStorage.setItem("user_permissions", JSON.stringify(newPermissions))
             localStorage.setItem("user_roles", JSON.stringify(newRoles))
+            if (newCompanyId) {
+                localStorage.setItem("user_company_id", newCompanyId.toString())
+            }
         } catch (error) {
             console.error("Error storing permissions:", error)
         }
+    }
+
+    // Define the hasPermission function within the component
+    const hasPermission = (permission: string | string[]): boolean => {
+        if (Array.isArray(permission)) {
+            // Check if the user has any of the permissions in the array
+            return permission.some((p) => permissions.includes(p))
+        }
+
+        // Check if the user has the specific permission
+        return permissions.includes(permission)
+    }
+
+    // Define the hasRole function within the component
+    const hasRole = (role: string | string[]): boolean => {
+        if (Array.isArray(role)) {
+            // Check if the user has any of the roles in the array
+            return role.some((r) => roles.includes(r))
+        }
+
+        // Check if the user has the specific role
+        return roles.includes(role)
     }
 
     return (
@@ -82,9 +100,11 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
             value={{
                 permissions,
                 roles,
+                companyId,
                 hasPermission,
                 hasRole,
                 setUserPermissions,
+                isBusOwner,
             }}
         >
             {children}
@@ -92,6 +112,11 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     )
 }
 
+// Export the hook to use the context
 export function usePermissions() {
-    return useContext(PermissionsContext)
+    const context = useContext(PermissionsContext)
+    if (!context) {
+        throw new Error("usePermissions must be used within a PermissionsProvider")
+    }
+    return context
 }

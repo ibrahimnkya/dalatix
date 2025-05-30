@@ -5,10 +5,10 @@ import { Calendar, Car, Download, LineChart, Loader2, Wallet, ChevronDown, FileT
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { CalendarDateRangePicker } from "@/components/dashboard/date-range-picker"
-import { BookingsDistribution } from "@/components/dashboard/bookings-distribution"
 import { RevenueDistribution } from "@/components/dashboard/revenue-distribution"
 import { useMobile } from "@/hooks/use-mobile"
-import { format } from "date-fns";
+import { usePermissions } from "@/hooks/use-permissions"
+import { format } from "date-fns"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { QuickActions } from "@/components/dashboard/quick-actions"
@@ -28,11 +28,14 @@ import {
 export default function DashboardPage() {
   const isMobile = useMobile()
   const { toast } = useToast()
+  const { isBusOwner, companyId } = usePermissions()
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [companies, setCompanies] = useState<Company[]>([])
-  const [selectedCompany, setSelectedCompany] = useState<string>("all")
+  const [selectedCompany, setSelectedCompany] = useState<string>(
+      isBusOwner() && companyId ? companyId.toString() : "all",
+  )
   const [dateRange, setDateRange] = useState<DateRange>(getDefaultDateRange())
   const [showFilters, setShowFilters] = useState(false)
   const [isExporting, setIsExporting] = useState(false)
@@ -43,26 +46,28 @@ export default function DashboardPage() {
     return cleanup
   }, [])
 
-  // Fetch companies
+  // Fetch companies (only if not bus owner)
   useEffect(() => {
-    const fetchCompanies = async () => {
-      try {
-        const response = await getCompanies()
-        if (response.success && Array.isArray(response.data)) {
-          setCompanies(response.data)
+    if (!isBusOwner()) {
+      const fetchCompanies = async () => {
+        try {
+          const response = await getCompanies()
+          if (response.success && Array.isArray(response.data)) {
+            setCompanies(response.data)
+          }
+        } catch (err) {
+          console.error("Error fetching companies:", err)
+          toast({
+            title: "Error",
+            description: "Failed to load companies. Please try again.",
+            variant: "destructive",
+          })
         }
-      } catch (err) {
-        console.error("Error fetching companies:", err)
-        toast({
-          title: "Error",
-          description: "Failed to load companies. Please try again.",
-          variant: "destructive",
-        })
       }
-    }
 
-    fetchCompanies()
-  }, [toast])
+      fetchCompanies()
+    }
+  }, [toast, isBusOwner])
 
   // Fetch dashboard stats
   useEffect(() => {
@@ -74,11 +79,11 @@ export default function DashboardPage() {
         const startDate = dateRange.from ? format(dateRange.from, "yyyy-MM-dd") : ""
         const endDate = dateRange.to ? format(dateRange.to, "yyyy-MM-dd") : ""
 
-        const response = await getDashboardStats(
-            selectedCompany === "all" ? undefined : selectedCompany,
-            startDate,
-            endDate,
-        )
+        // For bus owners, always use their company ID
+        const companyFilter =
+            isBusOwner() && companyId ? companyId.toString() : selectedCompany === "all" ? undefined : selectedCompany
+
+        const response = await getDashboardStats(companyFilter, startDate, endDate)
 
         if (response.success) {
           setStats(response.data)
@@ -96,7 +101,7 @@ export default function DashboardPage() {
     if (dateRange.from && dateRange.to) {
       fetchStats()
     }
-  }, [selectedCompany, dateRange])
+  }, [selectedCompany, dateRange, isBusOwner, companyId])
 
   const handleDateRangeChange = (range: DateRange) => {
     if (range.from && range.to) {
@@ -105,7 +110,10 @@ export default function DashboardPage() {
   }
 
   const handleCompanyChange = (value: string) => {
-    setSelectedCompany(value)
+    // Bus owners cannot change company
+    if (!isBusOwner()) {
+      setSelectedCompany(value)
+    }
   }
 
   const handleExport = async (format: ExportFormat) => {
@@ -122,12 +130,11 @@ export default function DashboardPage() {
         throw new Error("Please select a valid date range")
       }
 
-      const blob = await exportDashboardData(
-          format,
-          startDate,
-          endDate,
-          selectedCompany === "all" ? undefined : selectedCompany,
-      )
+      // For bus owners, always use their company ID
+      const companyFilter =
+          isBusOwner() && companyId ? companyId.toString() : selectedCompany === "all" ? undefined : selectedCompany
+
+      const blob = await exportDashboardData(format, startDate, endDate, companyFilter)
 
       if (!blob) {
         throw new Error("Failed to generate export file")
@@ -137,12 +144,14 @@ export default function DashboardPage() {
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
       const companyName =
-          selectedCompany === "all"
-              ? "all-companies"
-              : companies
-              .find((c) => c.id.toString() === selectedCompany)
-              ?.name?.toLowerCase()
-              .replace(/\s+/g, "-") || "company"
+          isBusOwner() && companyId
+              ? `company-${companyId}`
+              : selectedCompany === "all"
+                  ? "all-companies"
+                  : companies
+                  .find((c) => c.id.toString() === selectedCompany)
+                  ?.name?.toLowerCase()
+                  .replace(/\s+/g, "-") || "company"
 
       const fileName = `dalatix-${companyName}-${startDate}-to-${endDate}.${format}`
 
@@ -172,7 +181,7 @@ export default function DashboardPage() {
       <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 bg-background rounded-lg border border-border/40 shadow-sm">
         <div className="flex flex-col space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between space-y-2 sm:space-y-0">
-            <h2 className="text-2xl font-bold tracking-tight">Dashboard</h2>
+            <h2 className="text-2xl font-bold tracking-tight">Dashboard {isBusOwner() ? "- Bus Owner View" : ""}</h2>
 
             {/* Mobile filters toggle */}
             {isMobile && (
@@ -196,19 +205,22 @@ export default function DashboardPage() {
             >
               <CalendarDateRangePicker value={dateRange} onChange={handleDateRangeChange} showPresets={true} />
 
-              <Select value={selectedCompany} onValueChange={handleCompanyChange}>
-                <SelectTrigger className="w-full sm:w-[180px]">
-                  <SelectValue placeholder="All Companies" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Companies</SelectItem>
-                  {companies.map((company) => (
-                      <SelectItem key={company.id} value={company.id.toString()}>
-                        {company.name}
-                      </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {/* Company selector - hidden for bus owners */}
+              {!isBusOwner() && (
+                  <Select value={selectedCompany} onValueChange={handleCompanyChange}>
+                    <SelectTrigger className="w-full sm:w-[180px]">
+                      <SelectValue placeholder="All Companies" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Companies</SelectItem>
+                      {companies.map((company) => (
+                          <SelectItem key={company.id} value={company.id.toString()}>
+                            {company.name}
+                          </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+              )}
 
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -244,8 +256,8 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Quick Actions */}
-          <QuickActions />
+          {/* Quick Actions - pass bus owner status */}
+          <QuickActions isBusOwner={isBusOwner()} companyId={companyId} />
 
           {error && (
               <Alert variant="destructive">
@@ -283,7 +295,9 @@ export default function DashboardPage() {
                             })}
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            For period {stats?.period.start_date} to {stats?.period.end_date}
+                            {isBusOwner()
+                                ? "Your company revenue"
+                                : `For period ${stats?.period.start_date} to ${stats?.period.end_date}`}
                           </p>
                         </>
                     )}
@@ -310,7 +324,9 @@ export default function DashboardPage() {
                     ) : (
                         <>
                           <div className="text-2xl font-bold">{stats?.metrics.total_bookings.toLocaleString() || 0}</div>
-                          <p className="text-xs text-muted-foreground">{stats?.metrics.bookings_per_day} per day</p>
+                          <p className="text-xs text-muted-foreground">
+                            {isBusOwner() ? "Your company bookings" : `${stats?.metrics.bookings_per_day} per day`}
+                          </p>
                         </>
                     )}
                   </CardContent>
@@ -339,12 +355,15 @@ export default function DashboardPage() {
                             {stats?.metrics.total_active_vehicles.toLocaleString() || 0}
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            TZS{" "}
-                            {Number.parseFloat(stats?.metrics.revenue_per_vehicle || "0").toLocaleString("en-US", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}{" "}
-                            per vehicle
+                            {isBusOwner()
+                                ? "Your fleet size"
+                                : `TZS ${Number.parseFloat(stats?.metrics.revenue_per_vehicle || "0").toLocaleString(
+                                    "en-US",
+                                    {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2,
+                                    },
+                                )} per vehicle`}
                           </p>
                         </>
                     )}
@@ -392,11 +411,16 @@ export default function DashboardPage() {
                       isMobile={isMobile}
                       startDate={dateRange.from ? format(dateRange.from, "yyyy-MM-dd") : undefined}
                       endDate={dateRange.to ? format(dateRange.to, "yyyy-MM-dd") : undefined}
-                      companyId={selectedCompany === "all" ? undefined : selectedCompany}
+                      companyId={
+                        isBusOwner() && companyId
+                            ? companyId.toString()
+                            : selectedCompany === "all"
+                                ? undefined
+                                : selectedCompany
+                      }
                       className="col-span-1 lg:col-span-5"
                   />
               )}
-              {/*<BookingsDistribution isMobile={isMobile} />*/}
             </div>
           </div>
         </div>

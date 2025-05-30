@@ -34,6 +34,7 @@ import { useToast } from "@/components/ui/use-toast"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar as CalendarComponent } from "@/components/ui/calendar"
 import { getBookingsByDateRange, getBooking, updateBookingStatus } from "@/lib/services/booking"
+import { usePermissions } from "@/hooks/use-permissions"
 import type { Booking } from "@/types/booking"
 
 const ITEMS_PER_PAGE = 10
@@ -54,11 +55,12 @@ export default function BookingsPage() {
     })
     const [calendarOpen, setCalendarOpen] = useState(false)
     const { toast } = useToast()
+    const { isBusOwner, companyId } = usePermissions()
 
     // Fetch bookings on initial load and when date range changes
     useEffect(() => {
         fetchBookings()
-    }, [dateRange])
+    }, [dateRange, companyId])
 
     // Reset to first page when search query changes
     useEffect(() => {
@@ -71,11 +73,29 @@ export default function BookingsPage() {
             const startDate = format(dateRange.from, "yyyy-MM-dd")
             const endDate = format(dateRange.to, "yyyy-MM-dd")
 
-            const response = await getBookingsByDateRange({ startDate, endDate })
+            // The service will automatically handle company filtering for Bus Owners
+            const response = await getBookingsByDateRange({
+                startDate,
+                endDate,
+            })
+
             console.log("API Response:", response)
 
             // Always ensure bookings is an array
-            const bookingsData = Array.isArray(response) ? response : []
+            let bookingsData = Array.isArray(response) ? response : []
+
+            // Additional client-side filtering for Bus Owners as a safety measure
+            if (isBusOwner() && companyId) {
+                bookingsData = bookingsData.filter((booking) => {
+                    // Only show completed bookings that are used
+                    if (booking.status !== "completed" || !booking.used) return false
+
+                    // Only show bookings with vehicles belonging to the company
+                    if (booking.vehicle && booking.vehicle.company_id !== companyId) return false
+
+                    return true
+                })
+            }
 
             console.log("Processed bookings data:", bookingsData)
             setBookings(bookingsData)
@@ -96,6 +116,29 @@ export default function BookingsPage() {
         try {
             const booking = await getBooking(id)
             if (booking) {
+                // Additional security check for Bus Owners
+                if (isBusOwner() && companyId) {
+                    // Verify this is a completed and used booking
+                    if (booking.status !== "completed" || !booking.used) {
+                        toast({
+                            title: "Access Denied",
+                            description: "You can only view completed trips",
+                            variant: "destructive",
+                        })
+                        return
+                    }
+
+                    // Verify the vehicle belongs to the company
+                    if (booking.vehicle && booking.vehicle.company_id !== companyId) {
+                        toast({
+                            title: "Access Denied",
+                            description: "You can only view trips for your company's vehicles",
+                            variant: "destructive",
+                        })
+                        return
+                    }
+                }
+
                 console.log("Booking details:", booking)
                 setSelectedBooking(booking)
                 setViewDialogOpen(true)
@@ -117,6 +160,16 @@ export default function BookingsPage() {
     }
 
     const handleStatusChange = async () => {
+        // Bus Owners cannot change booking status
+        if (isBusOwner()) {
+            toast({
+                title: "Access Denied",
+                description: "Bus owners cannot modify booking status",
+                variant: "destructive",
+            })
+            return
+        }
+
         if (!selectedBooking || !newStatus) return
 
         setStatusLoading(true)
@@ -147,6 +200,16 @@ export default function BookingsPage() {
     }
 
     const openStatusDialog = (booking: Booking) => {
+        // Bus Owners cannot change booking status
+        if (isBusOwner()) {
+            toast({
+                title: "Access Denied",
+                description: "Bus owners cannot modify booking status",
+                variant: "destructive",
+            })
+            return
+        }
+
         setSelectedBooking(booking)
         setNewStatus(booking.status)
         setStatusDialogOpen(true)
@@ -156,6 +219,28 @@ export default function BookingsPage() {
     const getBookingStats = () => {
         if (!Array.isArray(bookings)) return { total: 0, active: 0, used: 0, cancelled: 0, deactivated: 0 }
 
+        // For Bus Owners, focus on used bookings statistics
+        if (isBusOwner()) {
+            // Calculate total revenue
+            const totalRevenue = bookings.reduce((sum, booking) => {
+                const fare = Number(booking.fare) || 0
+                const parcelFare = booking.has_percel ? Number(booking.percel_fare) || 0 : 0
+                return sum + fare + parcelFare
+            }, 0)
+
+            // Count unique vehicles
+            const uniqueVehicles = new Set(bookings.map((booking) => booking.vehicle_id).filter(Boolean)).size
+
+            return {
+                total: bookings.length,
+                used: bookings.length,
+                revenue: totalRevenue,
+                avgFare: bookings.length > 0 ? totalRevenue / bookings.length : 0,
+                vehicles: uniqueVehicles,
+            }
+        }
+
+        // Original logic for admin users
         return bookings.reduce(
             (stats, booking) => {
                 if (!booking) return stats
@@ -233,7 +318,7 @@ export default function BookingsPage() {
     }
 
     const getStatusText = (booking: Booking) => {
-        if (booking.used) return "Used"
+        if (booking.used) return isBusOwner() ? "Completed" : "Used"
         return booking.status?.charAt(0).toUpperCase() + (booking.status?.slice(1) || "")
     }
 
@@ -291,7 +376,9 @@ export default function BookingsPage() {
     return (
         <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
             <div className="flex items-center justify-between space-y-2">
-                <h2 className="text-3xl font-bold tracking-tight">Bookings Management</h2>
+                <h2 className="text-3xl font-bold tracking-tight">
+                    {isBusOwner() ? "Completed Trips - Your Company" : "Bookings Management"}
+                </h2>
                 <div className="flex items-center space-x-2">
                     <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
                         <PopoverTrigger asChild>
@@ -323,66 +410,119 @@ export default function BookingsPage() {
                 </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total Bookings</CardTitle>
-                        <Ticket className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.total}</div>}
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Active</CardTitle>
-                        <Ticket className="h-4 w-4 text-green-500" />
-                    </CardHeader>
-                    <CardContent>
-                        {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.active}</div>}
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Used</CardTitle>
-                        <Ticket className="h-4 w-4 text-blue-500" />
-                    </CardHeader>
-                    <CardContent>
-                        {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.used}</div>}
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Cancelled</CardTitle>
-                        <Ticket className="h-4 w-4 text-red-500" />
-                    </CardHeader>
-                    <CardContent>
-                        {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.cancelled}</div>}
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Deactivated</CardTitle>
-                        <Ticket className="h-4 w-4 text-gray-500" />
-                    </CardHeader>
-                    <CardContent>
-                        {loading ? (
-                            <Skeleton className="h-8 w-20" />
-                        ) : (
-                            <div className="text-2xl font-bold">{stats.deactivated}</div>
-                        )}
-                    </CardContent>
-                </Card>
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                {isBusOwner() ? (
+                    <>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Completed Trips</CardTitle>
+                                <Ticket className="h-4 w-4 text-muted-foreground" />
+                            </CardHeader>
+                            <CardContent>
+                                {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.total}</div>}
+                                <p className="text-xs text-muted-foreground">Your company's completed trips</p>
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
+                                <Ticket className="h-4 w-4 text-green-500" />
+                            </CardHeader>
+                            <CardContent>
+                                {loading ? (
+                                    <Skeleton className="h-8 w-20" />
+                                ) : (
+                                    <div className="text-2xl font-bold">{safeAmount(stats.revenue || 0)}</div>
+                                )}
+                                <p className="text-xs text-muted-foreground">From completed trips</p>
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Average Fare</CardTitle>
+                                <Ticket className="h-4 w-4 text-purple-500" />
+                            </CardHeader>
+                            <CardContent>
+                                {loading ? (
+                                    <Skeleton className="h-8 w-20" />
+                                ) : (
+                                    <div className="text-2xl font-bold">{safeAmount(stats.avgFare || 0)}</div>
+                                )}
+                                <p className="text-xs text-muted-foreground">Per completed trip</p>
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Company Vehicles</CardTitle>
+                                <Truck className="h-4 w-4 text-orange-500" />
+                            </CardHeader>
+                            <CardContent>
+                                {loading ? (
+                                    <Skeleton className="h-8 w-20" />
+                                ) : (
+                                    <div className="text-2xl font-bold">{stats.vehicles || 0}</div>
+                                )}
+                                <p className="text-xs text-muted-foreground">Active vehicles used</p>
+                            </CardContent>
+                        </Card>
+                    </>
+                ) : (
+                    <>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Total Bookings</CardTitle>
+                                <Ticket className="h-4 w-4 text-muted-foreground" />
+                            </CardHeader>
+                            <CardContent>
+                                {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.total}</div>}
+                                <p className="text-xs text-muted-foreground">All bookings</p>
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Active</CardTitle>
+                                <Ticket className="h-4 w-4 text-green-500" />
+                            </CardHeader>
+                            <CardContent>
+                                {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.active}</div>}
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Used</CardTitle>
+                                <Ticket className="h-4 w-4 text-blue-500" />
+                            </CardHeader>
+                            <CardContent>
+                                {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.used}</div>}
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Cancelled</CardTitle>
+                                <Ticket className="h-4 w-4 text-red-500" />
+                            </CardHeader>
+                            <CardContent>
+                                {loading ? (
+                                    <Skeleton className="h-8 w-20" />
+                                ) : (
+                                    <div className="text-2xl font-bold">{stats.cancelled}</div>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </>
+                )}
             </div>
 
             <Card>
                 <CardHeader>
-                    <CardTitle>Bookings</CardTitle>
-                    <CardDescription>Manage all bookings and reservations</CardDescription>
+                    <CardTitle>{isBusOwner() ? "Completed Trips" : "Bookings"}</CardTitle>
+                    <CardDescription>
+                        {isBusOwner() ? "View your company's completed trips and revenue" : "Manage all bookings and reservations"}
+                    </CardDescription>
                     <div className="flex w-full max-w-sm items-center space-x-2">
                         <Input
                             type="text"
-                            placeholder="Search bookings..."
+                            placeholder={isBusOwner() ? "Search trips..." : "Search bookings..."}
                             className="h-9"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
@@ -408,13 +548,13 @@ export default function BookingsPage() {
                                     <TableHeader>
                                         <TableRow>
                                             <TableHead>Booking #</TableHead>
-                                            <TableHead>AgentAttachment</TableHead>
+                                            <TableHead>{isBusOwner() ? "Passenger" : "User"}</TableHead>
                                             <TableHead>Route</TableHead>
                                             <TableHead>Vehicle</TableHead>
                                             <TableHead>Fare</TableHead>
-                                            <TableHead>Status</TableHead>
-                                            <TableHead>Scanning Status</TableHead>
-                                            <TableHead>Created</TableHead>
+                                            <TableHead>{isBusOwner() ? "Trip Status" : "Status"}</TableHead>
+                                            <TableHead>Journey Status</TableHead>
+                                            <TableHead>{isBusOwner() ? "Completed" : "Created"}</TableHead>
                                             <TableHead>Actions</TableHead>
                                         </TableRow>
                                     </TableHeader>
@@ -422,7 +562,7 @@ export default function BookingsPage() {
                                         {paginatedBookings.length === 0 ? (
                                             <TableRow>
                                                 <TableCell colSpan={9} className="h-24 text-center">
-                                                    No bookings found.
+                                                    {isBusOwner() ? "No completed trips found." : "No bookings found."}
                                                 </TableCell>
                                             </TableRow>
                                         ) : (
@@ -464,9 +604,12 @@ export default function BookingsPage() {
                                                             <Button variant="ghost" size="sm" onClick={() => handleViewBooking(booking.id)}>
                                                                 <Eye className="h-4 w-4" />
                                                             </Button>
-                                                            <Button variant="ghost" size="sm" onClick={() => openStatusDialog(booking)}>
-                                                                <RefreshCcw className="h-4 w-4" />
-                                                            </Button>
+                                                            {/* Only show status update button for non-Bus Owners */}
+                                                            {!isBusOwner() && (
+                                                                <Button variant="ghost" size="sm" onClick={() => openStatusDialog(booking)}>
+                                                                    <RefreshCcw className="h-4 w-4" />
+                                                                </Button>
+                                                            )}
                                                         </div>
                                                     </TableCell>
                                                 </TableRow>
@@ -481,7 +624,7 @@ export default function BookingsPage() {
                                 <div className="flex items-center justify-between space-x-2 py-4">
                                     <div className="text-sm text-muted-foreground">
                                         Showing {startIndex + 1} to {Math.min(endIndex, filteredBookings.length)} of{" "}
-                                        {filteredBookings.length} bookings
+                                        {filteredBookings.length} {isBusOwner() ? "trips" : "bookings"}
                                     </div>
                                     <div className="flex items-center space-x-2">
                                         <Button
@@ -536,14 +679,18 @@ export default function BookingsPage() {
             <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
                 <DialogContent className="sm:max-w-[600px]">
                     <DialogHeader>
-                        <DialogTitle>Booking Details</DialogTitle>
-                        <DialogDescription>Booking #{safeStr(selectedBooking?.booking_number)}</DialogDescription>
+                        <DialogTitle>{isBusOwner() ? "Trip Details" : "Booking Details"}</DialogTitle>
+                        <DialogDescription>
+                            {isBusOwner() ? "Trip" : "Booking"} #{safeStr(selectedBooking?.booking_number)}
+                        </DialogDescription>
                     </DialogHeader>
                     {selectedBooking && (
                         <div className="grid gap-4 py-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <h3 className="font-medium text-sm text-muted-foreground">AgentAttachment Information</h3>
+                                    <h3 className="font-medium text-sm text-muted-foreground">
+                                        {isBusOwner() ? "Passenger Information" : "User Information"}
+                                    </h3>
                                     <div className="flex items-center mt-1">
                                         <User className="h-4 w-4 mr-2 text-muted-foreground" />
                                         <p className="font-semibold">{getFullName(selectedBooking.user)}</p>
@@ -551,7 +698,9 @@ export default function BookingsPage() {
                                     <p className="text-sm mt-1">Type: {selectedBooking.type}</p>
                                 </div>
                                 <div>
-                                    <h3 className="font-medium text-sm text-muted-foreground">Booking Status</h3>
+                                    <h3 className="font-medium text-sm text-muted-foreground">
+                                        {isBusOwner() ? "Trip Status" : "Booking Status"}
+                                    </h3>
                                     <div className="flex space-x-2 items-center mt-1">
                                         <Badge
                                             variant="outline"
@@ -633,13 +782,15 @@ export default function BookingsPage() {
                                         </>
                                     )}
                                     <div>
-                                        <p className="text-sm text-muted-foreground">Created At</p>
+                                        <p className="text-sm text-muted-foreground">{isBusOwner() ? "Completed At" : "Created At"}</p>
                                         <p className="font-medium">{safeDate(selectedBooking.created_at)}</p>
                                     </div>
-                                    <div>
-                                        <p className="text-sm text-muted-foreground">Expires At</p>
-                                        <p className="font-medium">{safeDate(selectedBooking.expired_at)}</p>
-                                    </div>
+                                    {!isBusOwner() && (
+                                        <div>
+                                            <p className="text-sm text-muted-foreground">Expires At</p>
+                                            <p className="font-medium">{safeDate(selectedBooking.expired_at)}</p>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -648,63 +799,68 @@ export default function BookingsPage() {
                         <Button variant="outline" onClick={() => setViewDialogOpen(false)}>
                             Close
                         </Button>
-                        <Button
-                            onClick={() => {
-                                setViewDialogOpen(false)
-                                if (selectedBooking) {
-                                    openStatusDialog(selectedBooking)
-                                }
-                            }}
-                        >
-                            Update Status
-                        </Button>
+                        {/* Only show Update Status button for non-Bus Owners */}
+                        {!isBusOwner() && (
+                            <Button
+                                onClick={() => {
+                                    setViewDialogOpen(false)
+                                    if (selectedBooking) {
+                                        openStatusDialog(selectedBooking)
+                                    }
+                                }}
+                            >
+                                Update Status
+                            </Button>
+                        )}
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
 
-            {/* Update Status Dialog */}
-            <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
-                <DialogContent className="sm:max-w-[425px]">
-                    <DialogHeader>
-                        <DialogTitle>Update Booking Status</DialogTitle>
-                        <DialogDescription>
-                            Change the status for booking #{safeStr(selectedBooking?.booking_number)}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                        <div className="space-y-2">
-                            <p className="text-sm font-medium">Current Status</p>
-                            <Badge
-                                variant="outline"
-                                className={selectedBooking ? getStatusColor(selectedBooking.status || "", selectedBooking.used) : ""}
-                            >
-                                {selectedBooking ? getStatusText(selectedBooking) : ""}
-                            </Badge>
+            {/* Update Status Dialog - Only for non-Bus Owners */}
+            {!isBusOwner() && (
+                <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
+                    <DialogContent className="sm:max-w-[425px]">
+                        <DialogHeader>
+                            <DialogTitle>Update Booking Status</DialogTitle>
+                            <DialogDescription>
+                                Change the status for booking #{safeStr(selectedBooking?.booking_number)}
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="grid gap-4 py-4">
+                            <div className="space-y-2">
+                                <p className="text-sm font-medium">Current Status</p>
+                                <Badge
+                                    variant="outline"
+                                    className={selectedBooking ? getStatusColor(selectedBooking.status || "", selectedBooking.used) : ""}
+                                >
+                                    {selectedBooking ? getStatusText(selectedBooking) : ""}
+                                </Badge>
+                            </div>
+                            <div className="space-y-2">
+                                <p className="text-sm font-medium">New Status</p>
+                                <Select value={newStatus} onValueChange={setNewStatus}>
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Select a new status" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="active">Active</SelectItem>
+                                        <SelectItem value="cancelled">Cancelled</SelectItem>
+                                        <SelectItem value="deactivated">Deactivated</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
                         </div>
-                        <div className="space-y-2">
-                            <p className="text-sm font-medium">New Status</p>
-                            <Select value={newStatus} onValueChange={setNewStatus}>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select a new status" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="active">Active</SelectItem>
-                                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                                    <SelectItem value="deactivated">Deactivated</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>
-                            Cancel
-                        </Button>
-                        <Button onClick={handleStatusChange} disabled={statusLoading}>
-                            {statusLoading ? "Updating..." : "Update Status"}
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>
+                                Cancel
+                            </Button>
+                            <Button onClick={handleStatusChange} disabled={statusLoading}>
+                                {statusLoading ? "Updating..." : "Update Status"}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
         </div>
     )
 }

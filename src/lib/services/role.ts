@@ -194,7 +194,7 @@ export async function deleteRole(id: number): Promise<any> {
 
 export async function assignPermissionsToRole(roleId: number, data: { permissions: number[] }): Promise<any> {
     try {
-        const response = await fetch(`/api/proxy/roles/${roleId}/permissions`, {
+        const response = await fetch(`/api/proxy/roles/${roleId}/assign_permissions`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",

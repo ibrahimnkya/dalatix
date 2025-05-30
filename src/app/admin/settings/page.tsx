@@ -11,13 +11,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/components/ui/use-toast"
-import { AlertTriangle, CheckCircle, Globe, Lock, Mail, Moon, Shield, Sun, Zap, Users } from "lucide-react"
+import { usePermissions } from "@/hooks/use-permissions"
+import { AlertTriangle, CheckCircle, Globe, Lock, Mail, Moon, Shield, Sun, Zap, Users, Eye, EyeOff } from "lucide-react"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 
 export default function SettingsPage() {
   const { toast } = useToast()
+  const { isBusOwner } = usePermissions()
   const [isLoading, setIsLoading] = useState(false)
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false)
+  const [showNewPassword, setShowNewPassword] = useState(false)
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -33,6 +39,158 @@ export default function SettingsPage() {
     }, 1000)
   }
 
+  const handlePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+
+    // Simulate API call
+    setTimeout(() => {
+      setIsLoading(false)
+      toast({
+        title: "Password updated",
+        description: "Your password has been changed successfully.",
+      })
+    }, 1000)
+  }
+
+  // If user is a bus owner, show only password settings
+  if (isBusOwner()) {
+    return (
+        <div className="p-6 space-y-6">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight">Settings - Bus Owner</h1>
+            <p className="text-muted-foreground">Manage your account settings</p>
+          </div>
+
+          <Alert>
+            <Shield className="h-4 w-4" />
+            <AlertDescription>
+              As a Bus Owner, you have limited access to system settings. You can only change your password here. For
+              other settings, please contact your system administrator.
+            </AlertDescription>
+          </Alert>
+
+          <Card>
+            <form onSubmit={handlePasswordSubmit}>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Lock className="h-5 w-5" />
+                  Change Password
+                </CardTitle>
+                <CardDescription>Update your account password for security</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-2">
+                  <Label htmlFor="current-password">Current Password</Label>
+                  <div className="relative">
+                    <Input
+                        id="current-password"
+                        type={showCurrentPassword ? "text" : "password"}
+                        placeholder="Enter your current password"
+                        required
+                    />
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                        onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    >
+                      {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="new-password">New Password</Label>
+                  <div className="relative">
+                    <Input
+                        id="new-password"
+                        type={showNewPassword ? "text" : "password"}
+                        placeholder="Enter your new password"
+                        required
+                    />
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                        onClick={() => setShowNewPassword(!showNewPassword)}
+                    >
+                      {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Password must be at least 8 characters long and contain uppercase, lowercase, numbers, and symbols.
+                  </p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="confirm-password">Confirm New Password</Label>
+                  <div className="relative">
+                    <Input
+                        id="confirm-password"
+                        type={showConfirmPassword ? "text" : "password"}
+                        placeholder="Confirm your new password"
+                        required
+                    />
+                    <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    >
+                      {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+              <CardFooter>
+                <Button type="submit" disabled={isLoading}>
+                  {isLoading ? "Updating..." : "Update Password"}
+                </Button>
+              </CardFooter>
+            </form>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Security Audit Log</CardTitle>
+              <CardDescription>Recent security events for your account</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                <div className="flex items-start gap-4 rounded-lg border p-4">
+                  <CheckCircle className="h-5 w-5 text-green-500 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Successful login</p>
+                    <p className="text-xs text-muted-foreground">IP: 41.222.103.45 • Today at 10:23 AM</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4 rounded-lg border p-4">
+                  <AlertTriangle className="h-5 w-5 text-amber-500 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Failed login attempt</p>
+                    <p className="text-xs text-muted-foreground">IP: 185.176.43.89 • Yesterday at 8:47 PM</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-4 rounded-lg border p-4">
+                  <Lock className="h-5 w-5 text-blue-500 mt-0.5" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">Password changed</p>
+                    <p className="text-xs text-muted-foreground">IP: 41.222.103.45 • 3 days ago at 2:15 PM</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+            <CardFooter>
+              <Button variant="outline">View Full Audit Log</Button>
+            </CardFooter>
+          </Card>
+        </div>
+    )
+  }
+
+  // Full settings for non-bus owners (existing code)
   return (
       <div className="p-6 space-y-6">
         <div>
@@ -412,7 +570,7 @@ export default function SettingsPage() {
 
           <TabsContent value="security" className="space-y-6">
             <Card>
-              <form onSubmit={handleSubmit}>
+              <form onSubmit={handlePasswordSubmit}>
                 <CardHeader>
                   <CardTitle>Password Settings</CardTitle>
                   <CardDescription>Update your password and security preferences</CardDescription>
@@ -420,15 +578,66 @@ export default function SettingsPage() {
                 <CardContent className="space-y-6">
                   <div className="space-y-2">
                     <Label htmlFor="current-password">Current Password</Label>
-                    <Input id="current-password" type="password" />
+                    <div className="relative">
+                      <Input
+                          id="current-password"
+                          type={showCurrentPassword ? "text" : "password"}
+                          placeholder="Enter your current password"
+                          required
+                      />
+                      <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                          onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                      >
+                        {showCurrentPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="new-password">New Password</Label>
-                    <Input id="new-password" type="password" />
+                    <div className="relative">
+                      <Input
+                          id="new-password"
+                          type={showNewPassword ? "text" : "password"}
+                          placeholder="Enter your new password"
+                          required
+                      />
+                      <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                          onClick={() => setShowNewPassword(!showNewPassword)}
+                      >
+                        {showNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      Password must be at least 8 characters long and contain uppercase, lowercase, numbers, and symbols.
+                    </p>
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="confirm-password">Confirm New Password</Label>
-                    <Input id="confirm-password" type="password" />
+                    <div className="relative">
+                      <Input
+                          id="confirm-password"
+                          type={showConfirmPassword ? "text" : "password"}
+                          placeholder="Confirm your new password"
+                          required
+                      />
+                      <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                          onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                      >
+                        {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
                 <CardFooter>
@@ -576,6 +785,21 @@ export default function SettingsPage() {
                           </TableCell>
                         </TableRow>
                         <TableRow>
+                          <TableCell className="font-medium">Bus Owner</TableCell>
+                          <TableCell>Limited access for bus company owners</TableCell>
+                          <TableCell>15</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
+                              Active
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="ghost" size="sm">
+                              Edit
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                        <TableRow>
                           <TableCell className="font-medium">Manager</TableCell>
                           <TableCell>Management access for specific areas</TableCell>
                           <TableCell>8</TableCell>
@@ -659,163 +883,6 @@ export default function SettingsPage() {
                   </div>
                 </div>
               </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Permission Management</CardTitle>
-                <CardDescription>Configure permissions for each role</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-sm font-medium">Select Role to Edit Permissions</h3>
-                    </div>
-                    <Select defaultValue="admin">
-                      <SelectTrigger className="w-[200px]">
-                        <SelectValue placeholder="Select role" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="super-admin">Super Admin</SelectItem>
-                        <SelectItem value="admin">Admin</SelectItem>
-                        <SelectItem value="manager">Manager</SelectItem>
-                        <SelectItem value="agent">Agent</SelectItem>
-                        <SelectItem value="driver">Driver</SelectItem>
-                        <SelectItem value="conductor">Conductor</SelectItem>
-                        <SelectItem value="viewer">Viewer</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-4">
-                    <div className="rounded-lg border p-4">
-                      <h3 className="text-sm font-medium mb-3">Dashboard Access</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="view-dashboard">View Dashboard</Label>
-                          <Switch id="view-dashboard" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="view-analytics">View Analytics</Label>
-                          <Switch id="view-analytics" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="export-reports">Export Reports</Label>
-                          <Switch id="export-reports" defaultChecked />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg border p-4">
-                      <h3 className="text-sm font-medium mb-3">User Management</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="view-users">View Users</Label>
-                          <Switch id="view-users" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="create-users">Create Users</Label>
-                          <Switch id="create-users" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="edit-users">Edit Users</Label>
-                          <Switch id="edit-users" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="delete-users">Delete Users</Label>
-                          <Switch id="delete-users" />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="manage-roles">Manage Roles</Label>
-                          <Switch id="manage-roles" />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg border p-4">
-                      <h3 className="text-sm font-medium mb-3">Transportation Management</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="view-vehicles">View Vehicles</Label>
-                          <Switch id="view-vehicles" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="manage-vehicles">Manage Vehicles</Label>
-                          <Switch id="manage-vehicles" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="view-routes">View Routes</Label>
-                          <Switch id="view-routes" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="manage-routes">Manage Routes</Label>
-                          <Switch id="manage-routes" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="view-bus-stops">View Bus Stops</Label>
-                          <Switch id="view-bus-stops" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="manage-bus-stops">Manage Bus Stops</Label>
-                          <Switch id="manage-bus-stops" defaultChecked />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg border p-4">
-                      <h3 className="text-sm font-medium mb-3">Booking Management</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="view-bookings">View Bookings</Label>
-                          <Switch id="view-bookings" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="create-bookings">Create Bookings</Label>
-                          <Switch id="create-bookings" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="edit-bookings">Edit Bookings</Label>
-                          <Switch id="edit-bookings" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="cancel-bookings">Cancel Bookings</Label>
-                          <Switch id="cancel-bookings" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="issue-refunds">Issue Refunds</Label>
-                          <Switch id="issue-refunds" />
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-lg border p-4">
-                      <h3 className="text-sm font-medium mb-3">System Settings</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="view-settings">View Settings</Label>
-                          <Switch id="view-settings" defaultChecked />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="edit-settings">Edit Settings</Label>
-                          <Switch id="edit-settings" />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="manage-api">Manage API</Label>
-                          <Switch id="manage-api" />
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <Label htmlFor="system-backup">System Backup</Label>
-                          <Switch id="system-backup" />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-              <CardFooter>
-                <Button type="submit">Save Permissions</Button>
-              </CardFooter>
             </Card>
           </TabsContent>
 
