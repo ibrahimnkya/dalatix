@@ -10,7 +10,7 @@ import {
     MapPin,
     Clock,
     User,
-    Truck,
+    Bus,
     ChevronLeft,
     ChevronRight,
 } from "lucide-react"
@@ -28,37 +28,194 @@ import {
     DialogHeader,
     DialogTitle,
 } from "@/components/ui/dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { format } from "date-fns"
+import { format, subDays } from "date-fns"
 import { useToast } from "@/components/ui/use-toast"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Calendar as CalendarComponent } from "@/components/ui/calendar"
-import { getBookingsByDateRange, getBooking, updateBookingStatus } from "@/lib/services/booking"
-import type { Booking } from "@/types/booking"
+import { usePermissions } from "@/hooks/use-permissions"
+import { useTitle } from "@/context/TitleContext"
+
+interface Booking {
+    id: number
+    booking_number: string
+    fare: string
+    percel_fare: string
+    type: string
+    has_percel: boolean
+    user_id: number
+    vehicle_id: number | null
+    used: boolean
+    scanned_in_at: string | null
+    scanned_out_at: string | null
+    created_at: string
+    updated_at: string
+    status: string
+    expired_at: string | null
+    cancelled_at: string | null
+    deactivated_at: string | null
+    vehicle: {
+        id: number
+        name: string
+        registration_number: string
+        company_id?: number
+    } | null
+    user: {
+        id: number
+        first_name: string
+        last_name: string
+    }
+    start_point: {
+        id: number
+        name: string
+        code: string
+    }
+    end_point: {
+        id: number
+        name: string
+        code: string
+    }
+}
 
 const ITEMS_PER_PAGE = 10
 
+async function getBookings(filters: any = {}) {
+    try {
+        // Build query parameters
+        const params = new URLSearchParams()
+
+        // Date range parameters (required by the API)
+        params.set("start_date", filters.start_date || format(subDays(new Date(), 30), "yyyy-MM-dd"))
+        params.set("end_date", filters.end_date || format(new Date(), "yyyy-MM-dd"))
+
+        // Don't use pagination in API call - we'll handle it client-side for better filtering
+        params.set("paginate", "false")
+
+        // Optional filters
+        if (filters.vehicle_id) params.set("vehicle_id", String(filters.vehicle_id))
+        if (filters.status) params.set("status", filters.status)
+        if (filters.company_id) params.set("company_id", String(filters.company_id))
+
+        console.log("Fetching bookings with params:", params.toString())
+
+        // Use the exact API endpoint provided
+        const response = await fetch(`/api/proxy/bookings/by_date_range?${params}`, {
+            method: "GET",
+            headers: {
+                Accept: "application/json",
+            },
+            cache: "no-store",
+        })
+
+        if (!response.ok) {
+            const errorText = await response.text()
+            console.error("Bookings API error:", response.status, errorText)
+            throw new Error(`API Error: ${response.status} - ${errorText}`)
+        }
+
+        const data = await response.json()
+        console.log("Raw API response:", data)
+
+        // Handle the actual API response structure
+        if (data.success) {
+            // If paginated response
+            if (data.data && data.data.data && Array.isArray(data.data.data)) {
+                console.log("Using paginated response format, found", data.data.data.length, "bookings")
+                return data.data.data
+            }
+            // If direct array response
+            if (Array.isArray(data.data)) {
+                console.log("Using direct array response format, found", data.data.length, "bookings")
+                return data.data
+            }
+        }
+
+        // If data is directly an array
+        if (Array.isArray(data)) {
+            console.log("Using direct response format, found", data.length, "bookings")
+            return data
+        }
+
+        console.warn("Unexpected API response format:", data)
+        return []
+    } catch (error) {
+        console.error("Error fetching bookings:", error)
+        throw error
+    }
+}
+
+// Function to get company vehicles
+async function getCompanyVehicles(companyId: number) {
+    try {
+        const response = await fetch(`/api/proxy/vehicles?company_id=${companyId}`, {
+            method: "GET",
+            headers: {
+                Accept: "application/json",
+            },
+            cache: "no-store",
+        })
+
+        if (!response.ok) {
+            console.warn("Could not fetch company vehicles")
+            return []
+        }
+
+        const data = await response.json()
+        console.log("Company vehicles response:", data)
+
+        if (data.success && Array.isArray(data.data)) {
+            return data.data.map((vehicle: any) => vehicle.id)
+        }
+
+        return []
+    } catch (error) {
+        console.warn("Error fetching company vehicles:", error)
+        return []
+    }
+}
+
 export default function BookingsPage() {
+    const { setTitle } = useTitle()
     const [bookings, setBookings] = useState<Booking[]>([])
     const [loading, setLoading] = useState(true)
+    const [error, setError] = useState<string | null>(null)
     const [searchQuery, setSearchQuery] = useState("")
     const [selectedBooking, setSelectedBooking] = useState<Booking | null>(null)
     const [viewDialogOpen, setViewDialogOpen] = useState(false)
-    const [statusDialogOpen, setStatusDialogOpen] = useState(false)
-    const [newStatus, setNewStatus] = useState<string>("")
-    const [statusLoading, setStatusLoading] = useState(false)
     const [currentPage, setCurrentPage] = useState(1)
     const [dateRange, setDateRange] = useState<{ from: Date; to: Date }>({
-        from: new Date(new Date().setDate(new Date().getDate() - 30)), // Default to last 30 days
+        from: subDays(new Date(), 30), // Default to last 30 days
         to: new Date(),
     })
     const [calendarOpen, setCalendarOpen] = useState(false)
+    const [companyVehicleIds, setCompanyVehicleIds] = useState<number[]>([])
     const { toast } = useToast()
+    const { companyId } = usePermissions()
+
+    useEffect(() => {
+        setTitle("Completed Trips")
+    }, [setTitle])
+
+    // Fetch company vehicles when component mounts
+    useEffect(() => {
+        const fetchCompanyVehicles = async () => {
+            if (companyId) {
+                try {
+                    const vehicleIds = await getCompanyVehicles(companyId)
+                    console.log("Company vehicle IDs:", vehicleIds)
+                    setCompanyVehicleIds(vehicleIds)
+                } catch (error) {
+                    console.warn("Could not fetch company vehicles:", error)
+                }
+            }
+        }
+
+        fetchCompanyVehicles()
+    }, [companyId])
 
     // Fetch bookings on initial load and when date range changes
     useEffect(() => {
         fetchBookings()
-    }, [dateRange])
+    }, [dateRange, companyId, companyVehicleIds])
 
     // Reset to first page when search query changes
     useEffect(() => {
@@ -67,23 +224,99 @@ export default function BookingsPage() {
 
     const fetchBookings = async () => {
         setLoading(true)
+        setError(null)
+
         try {
+            if (!companyId) {
+                throw new Error("Company ID not available. Please ensure you are logged in as a bus owner.")
+            }
+
             const startDate = format(dateRange.from, "yyyy-MM-dd")
             const endDate = format(dateRange.to, "yyyy-MM-dd")
 
-            const response = await getBookingsByDateRange({ startDate, endDate })
-            console.log("API Response:", response)
+            console.log("Fetching bookings for company:", companyId, "Date range:", startDate, "to", endDate)
+
+            const response = await getBookings({
+                start_date: startDate,
+                end_date: endDate,
+            })
+
+            console.log("Raw bookings response:", response)
+            console.log("Total bookings from API:", response.length)
 
             // Always ensure bookings is an array
-            const bookingsData = Array.isArray(response) ? response : []
+            let bookingsData = Array.isArray(response) ? response : []
 
-            console.log("Processed bookings data:", bookingsData)
+            // Filter for bus owners: only show bookings scanned in by company vehicles
+            if (companyId && companyVehicleIds.length > 0) {
+                const originalCount = bookingsData.length
+
+                bookingsData = bookingsData.filter((booking) => {
+                    // Validate booking object
+                    if (!booking || typeof booking !== "object") {
+                        console.warn("Invalid booking object:", booking)
+                        return false
+                    }
+
+                    // Must be scanned in (scanned_in_at exists)
+                    if (!booking.scanned_in_at) {
+                        return false
+                    }
+
+                    // Must have a vehicle that scanned it in
+                    if (!booking.vehicle_id) {
+                        return false
+                    }
+
+                    // The vehicle that scanned it must belong to the company
+                    const belongsToCompany = companyVehicleIds.includes(booking.vehicle_id)
+
+                    if (!belongsToCompany) {
+                        return false
+                    }
+
+                    console.log("Booking passed filter:", {
+                        id: booking.id,
+                        booking_number: booking.booking_number,
+                        vehicle_id: booking.vehicle_id,
+                        scanned_in_at: booking.scanned_in_at,
+                        used: booking.used,
+                    })
+
+                    return true
+                })
+
+                console.log(`Filtered bookings: ${originalCount} -> ${bookingsData.length} (company: ${companyId})`)
+                console.log("Company vehicle IDs:", companyVehicleIds)
+                console.log("Filtered bookings:", bookingsData)
+            }
+
+            // Validate and clean the booking data
+            bookingsData = bookingsData.map((booking) => ({
+                ...booking,
+                // Ensure required fields have fallback values
+                booking_number: booking.booking_number || `BK-${booking.id}`,
+                fare: booking.fare || "0",
+                percel_fare: booking.percel_fare || "0",
+                type: booking.type || "Adult",
+                has_percel: Boolean(booking.has_percel),
+                used: Boolean(booking.used),
+                status: booking.status || "active",
+                user: booking.user || { id: 0, first_name: "Unknown", last_name: "User" },
+                vehicle: booking.vehicle || null,
+                start_point: booking.start_point || { id: 0, name: "Unknown", code: "UNK" },
+                end_point: booking.end_point || { id: 0, name: "Unknown", code: "UNK" },
+            }))
+
+            console.log("Final processed bookings:", bookingsData)
             setBookings(bookingsData)
         } catch (error) {
             console.error("Error fetching bookings:", error)
+            const errorMessage = error instanceof Error ? error.message : "Failed to load bookings. Please try again."
+            setError(errorMessage)
             toast({
                 title: "Error",
-                description: "Failed to load bookings. Please try again.",
+                description: errorMessage,
                 variant: "destructive",
             })
             setBookings([])
@@ -92,22 +325,36 @@ export default function BookingsPage() {
         }
     }
 
-    const handleViewBooking = async (id: number) => {
+    const handleViewBooking = async (booking: Booking) => {
         try {
-            const booking = await getBooking(id)
-            if (booking) {
-                console.log("Booking details:", booking)
-                setSelectedBooking(booking)
-                setViewDialogOpen(true)
-            } else {
-                toast({
-                    title: "Error",
-                    description: "Booking not found",
-                    variant: "destructive",
-                })
+            // Additional security check for Bus Owners
+            if (companyId && companyVehicleIds.length > 0) {
+                // Verify this booking was scanned by a company vehicle
+                if (!booking.scanned_in_at) {
+                    toast({
+                        title: "Access Denied",
+                        description: "You can only view scanned trips",
+                        variant: "destructive",
+                    })
+                    return
+                }
+
+                // Verify the vehicle belongs to the company
+                if (booking.vehicle_id && !companyVehicleIds.includes(booking.vehicle_id)) {
+                    toast({
+                        title: "Access Denied",
+                        description: "You can only view trips for your company's vehicles",
+                        variant: "destructive",
+                    })
+                    return
+                }
             }
+
+            console.log("Viewing booking details:", booking)
+            setSelectedBooking(booking)
+            setViewDialogOpen(true)
         } catch (error) {
-            console.error("Error fetching booking details:", error)
+            console.error("Error viewing booking details:", error)
             toast({
                 title: "Error",
                 description: "Failed to load booking details",
@@ -116,72 +363,38 @@ export default function BookingsPage() {
         }
     }
 
-    const handleStatusChange = async () => {
-        if (!selectedBooking || !newStatus) return
-
-        setStatusLoading(true)
-        try {
-            const updatedBooking = await updateBookingStatus(selectedBooking.id, { status: newStatus })
-            if (updatedBooking) {
-                // Update the booking in the list
-                setBookings((prevBookings) => prevBookings.map((b) => (b.id === updatedBooking.id ? updatedBooking : b)))
-                setSelectedBooking(updatedBooking)
-                setStatusDialogOpen(false)
-                toast({
-                    title: "Success",
-                    description: `Booking status updated to ${newStatus}`,
-                })
-            } else {
-                throw new Error("Failed to update status")
-            }
-        } catch (error) {
-            console.error("Error updating booking status:", error)
-            toast({
-                title: "Error",
-                description: "Failed to update booking status",
-                variant: "destructive",
-            })
-        } finally {
-            setStatusLoading(false)
-        }
-    }
-
-    const openStatusDialog = (booking: Booking) => {
-        setSelectedBooking(booking)
-        setNewStatus(booking.status)
-        setStatusDialogOpen(true)
-    }
-
     // Calculate actual booking statistics
     const getBookingStats = () => {
-        if (!Array.isArray(bookings)) return { total: 0, active: 0, used: 0, cancelled: 0, deactivated: 0 }
+        if (!Array.isArray(bookings) || bookings.length === 0) {
+            return { total: 0, revenue: 0, avgFare: 0, vehicles: 0 }
+        }
 
-        return bookings.reduce(
-            (stats, booking) => {
-                if (!booking) return stats
+        try {
+            // Calculate total revenue
+            const totalRevenue = bookings.reduce((sum, booking) => {
+                const fare = Number.parseFloat(booking.fare) || 0
+                const parcelFare = booking.has_percel ? Number.parseFloat(booking.percel_fare) || 0 : 0
+                return sum + fare + parcelFare
+            }, 0)
 
-                stats.total++
+            // Count unique vehicles
+            const uniqueVehicles = new Set(
+                bookings.map((booking) => booking.vehicle_id).filter((id) => id !== null && id !== undefined),
+            ).size
 
-                if (booking.used) {
-                    stats.used++
-                } else {
-                    switch (booking.status) {
-                        case "active":
-                            stats.active++
-                            break
-                        case "cancelled":
-                            stats.cancelled++
-                            break
-                        case "deactivated":
-                            stats.deactivated++
-                            break
-                    }
-                }
+            const stats = {
+                total: bookings.length,
+                revenue: totalRevenue,
+                avgFare: bookings.length > 0 ? totalRevenue / bookings.length : 0,
+                vehicles: uniqueVehicles,
+            }
 
-                return stats
-            },
-            { total: 0, active: 0, used: 0, cancelled: 0, deactivated: 0 },
-        )
+            console.log("Calculated stats:", stats)
+            return stats
+        } catch (error) {
+            console.error("Error calculating stats:", error)
+            return { total: 0, revenue: 0, avgFare: 0, vehicles: 0 }
+        }
     }
 
     const stats = getBookingStats()
@@ -191,21 +404,28 @@ export default function BookingsPage() {
         ? bookings.filter((booking) => {
             if (!booking) return false
 
-            // Make sure booking and its nested properties exist before accessing
-            const bookingNumber = booking?.booking_number || ""
-            const userName = booking?.user ? `${booking.user.first_name || ""} ${booking.user.last_name || ""}`.trim() : ""
-            const vehicleName = booking?.vehicle?.name || ""
-            const startPoint = booking?.start_point?.name || ""
-            const endPoint = booking?.end_point?.name || ""
+            try {
+                // Make sure booking and its nested properties exist before accessing
+                const bookingNumber = String(booking.booking_number || "")
+                const userName = booking.user
+                    ? `${String(booking.user.first_name || "")} ${String(booking.user.last_name || "")}`.trim()
+                    : ""
+                const vehicleName = String(booking.vehicle?.name || "")
+                const startPoint = String(booking.start_point?.name || "")
+                const endPoint = String(booking.end_point?.name || "")
 
-            const searchLower = searchQuery.toLowerCase()
-            return (
-                bookingNumber.toLowerCase().includes(searchLower) ||
-                userName.toLowerCase().includes(searchLower) ||
-                vehicleName.toLowerCase().includes(searchLower) ||
-                startPoint.toLowerCase().includes(searchLower) ||
-                endPoint.toLowerCase().includes(searchLower)
-            )
+                const searchLower = searchQuery.toLowerCase()
+                return (
+                    bookingNumber.toLowerCase().includes(searchLower) ||
+                    userName.toLowerCase().includes(searchLower) ||
+                    vehicleName.toLowerCase().includes(searchLower) ||
+                    startPoint.toLowerCase().includes(searchLower) ||
+                    endPoint.toLowerCase().includes(searchLower)
+                )
+            } catch (error) {
+                console.warn("Error filtering booking:", booking, error)
+                return false
+            }
         })
         : []
 
@@ -233,40 +453,42 @@ export default function BookingsPage() {
     }
 
     const getStatusText = (booking: Booking) => {
-        if (booking.used) return "Used"
-        return booking.status?.charAt(0).toUpperCase() + (booking.status?.slice(1) || "")
+        if (booking.used) return "Completed"
+        const status = booking.status || "unknown"
+        return status.charAt(0).toUpperCase() + status.slice(1)
     }
 
     const getScanningStatus = (booking: Booking) => {
-        if (!booking.vehicle) return "Not Scanned In"
-        if (!booking.scanned_in_at) return "Not Boarded"
-        if (!booking.scanned_out_at) return "Not Dropped"
-        return "Completed"
+        if (!booking.scanned_in_at) return "Not Scanned In"
+        if (!booking.scanned_out_at) return "In Transit"
+        return "Completed Journey"
     }
 
     const getScanningStatusColor = (booking: Booking) => {
-        if (!booking.vehicle || !booking.scanned_in_at)
-            return "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100"
+        if (!booking.scanned_in_at) return "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100"
         if (!booking.scanned_out_at) return "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100"
         return "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100"
     }
 
     const getTotalFare = (booking: Booking) => {
-        const fare = Number(booking.fare) || 0
-        const parcelFare = booking.has_percel ? Number(booking.percel_fare) || 0 : 0
+        const fare = Number.parseFloat(booking.fare) || 0
+        const parcelFare = booking.has_percel ? Number.parseFloat(booking.percel_fare) || 0 : 0
         return fare + parcelFare
     }
 
     // Helper function to safely access booking properties
     const safeStr = (value: any): string => {
-        return value?.toString() || ""
+        if (value === null || value === undefined) return ""
+        return String(value)
     }
 
     // Helper function to safely format dates
     const safeDate = (dateStr: string | null) => {
         if (!dateStr) return "Not set"
         try {
-            return new Date(dateStr).toLocaleString("en-US", {
+            const date = new Date(dateStr)
+            if (isNaN(date.getTime())) return "Invalid date"
+            return date.toLocaleString("en-US", {
                 dateStyle: "short",
                 timeStyle: "short",
             })
@@ -277,21 +499,46 @@ export default function BookingsPage() {
 
     // Helper function to safely format currency
     const safeAmount = (amount: any) => {
-        if (!amount) return "TZS0"
-        const num = Number(amount)
-        return isNaN(num) ? "TZS0" : `TZS${num.toLocaleString()}`
+        if (amount === null || amount === undefined) return "TZS 0"
+        const num = Number.parseFloat(String(amount))
+        return isNaN(num) ? "TZS 0" : `TZS ${num.toLocaleString()}`
     }
 
     // Helper function to get full name
     const getFullName = (user: any) => {
-        if (!user) return "Unknown"
-        return `${user.first_name || ""} ${user.last_name || ""}`.trim() || "Unknown"
+        if (!user) return "Unknown User"
+        const firstName = String(user.first_name || "")
+        const lastName = String(user.last_name || "")
+        const fullName = `${firstName} ${lastName}`.trim()
+        return fullName || "Unknown User"
+    }
+
+    // Show error state
+    if (error && !loading) {
+        return (
+            <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+                <div className="flex items-center justify-between space-y-2">
+                    <h2 className="text-3xl font-bold tracking-tight">Completed Trips - Your Company</h2>
+                </div>
+                <Card>
+                    <CardContent className="p-6">
+                        <div className="text-center">
+                            <p className="text-red-600 mb-4">{error}</p>
+                            <Button onClick={fetchBookings}>
+                                <RefreshCcw className="mr-2 h-4 w-4" />
+                                Try Again
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
+        )
     }
 
     return (
         <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
             <div className="flex items-center justify-between space-y-2">
-                <h2 className="text-3xl font-bold tracking-tight">Bookings Management</h2>
+                <h2 className="text-3xl font-bold tracking-tight">Scanned Trips - Your Company</h2>
                 <div className="flex items-center space-x-2">
                     <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
                         <PopoverTrigger asChild>
@@ -316,73 +563,84 @@ export default function BookingsPage() {
                             />
                         </PopoverContent>
                     </Popover>
-                    <Button variant="outline" onClick={fetchBookings}>
-                        <RefreshCcw className="mr-2 h-4 w-4" />
+                    <Button variant="outline" onClick={fetchBookings} disabled={loading}>
+                        <RefreshCcw className={`mr-2 h-4 w-4 ${loading ? "animate-spin" : ""}`} />
                         Refresh
                     </Button>
                 </div>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+            {/* Debug Information */}
+            {process.env.NODE_ENV === "development" && (
+                <Card className="bg-gray-50">
+                    <CardContent className="p-4">
+                        <p className="text-sm text-gray-600">
+                            Debug: Company ID: {companyId}, Vehicle IDs: [{companyVehicleIds.join(", ")}], Total Bookings:{" "}
+                            {bookings.length}, Filtered: {filteredBookings.length}
+                        </p>
+                    </CardContent>
+                </Card>
+            )}
+
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total Bookings</CardTitle>
+                        <CardTitle className="text-sm font-medium">Scanned Trips</CardTitle>
                         <Ticket className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
                         {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.total}</div>}
+                        <p className="text-xs text-muted-foreground">Trips scanned by your vehicles</p>
                     </CardContent>
                 </Card>
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Active</CardTitle>
+                        <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
                         <Ticket className="h-4 w-4 text-green-500" />
-                    </CardHeader>
-                    <CardContent>
-                        {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.active}</div>}
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Used</CardTitle>
-                        <Ticket className="h-4 w-4 text-blue-500" />
-                    </CardHeader>
-                    <CardContent>
-                        {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.used}</div>}
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Cancelled</CardTitle>
-                        <Ticket className="h-4 w-4 text-red-500" />
-                    </CardHeader>
-                    <CardContent>
-                        {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.cancelled}</div>}
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Deactivated</CardTitle>
-                        <Ticket className="h-4 w-4 text-gray-500" />
                     </CardHeader>
                     <CardContent>
                         {loading ? (
                             <Skeleton className="h-8 w-20" />
                         ) : (
-                            <div className="text-2xl font-bold">{stats.deactivated}</div>
+                            <div className="text-2xl font-bold">{safeAmount(stats.revenue)}</div>
                         )}
+                        <p className="text-xs text-muted-foreground">From scanned trips</p>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Average Fare</CardTitle>
+                        <Ticket className="h-4 w-4 text-purple-500" />
+                    </CardHeader>
+                    <CardContent>
+                        {loading ? (
+                            <Skeleton className="h-8 w-20" />
+                        ) : (
+                            <div className="text-2xl font-bold">{safeAmount(Math.round(stats.avgFare))}</div>
+                        )}
+                        <p className="text-xs text-muted-foreground">Per scanned trip</p>
+                    </CardContent>
+                </Card>
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <CardTitle className="text-sm font-medium">Active Vehicles</CardTitle>
+                        <Bus className="h-4 w-4 text-orange-500" />
+                    </CardHeader>
+                    <CardContent>
+                        {loading ? <Skeleton className="h-8 w-20" /> : <div className="text-2xl font-bold">{stats.vehicles}</div>}
+                        <p className="text-xs text-muted-foreground">Vehicles with scanned trips</p>
                     </CardContent>
                 </Card>
             </div>
 
             <Card>
                 <CardHeader>
-                    <CardTitle>Bookings</CardTitle>
-                    <CardDescription>Manage all bookings and reservations</CardDescription>
+                    <CardTitle>Scanned Trips</CardTitle>
+                    <CardDescription>View trips scanned by your company's vehicles</CardDescription>
                     <div className="flex w-full max-w-sm items-center space-x-2">
                         <Input
                             type="text"
-                            placeholder="Search bookings..."
+                            placeholder="Search trips..."
                             className="h-9"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
@@ -408,13 +666,13 @@ export default function BookingsPage() {
                                     <TableHeader>
                                         <TableRow>
                                             <TableHead>Booking #</TableHead>
-                                            <TableHead>AgentAttachment</TableHead>
+                                            <TableHead>Passenger</TableHead>
                                             <TableHead>Route</TableHead>
                                             <TableHead>Vehicle</TableHead>
                                             <TableHead>Fare</TableHead>
                                             <TableHead>Status</TableHead>
-                                            <TableHead>Scanning Status</TableHead>
-                                            <TableHead>Created</TableHead>
+                                            <TableHead>Journey Status</TableHead>
+                                            <TableHead>Scanned In</TableHead>
                                             <TableHead>Actions</TableHead>
                                         </TableRow>
                                     </TableHeader>
@@ -422,7 +680,9 @@ export default function BookingsPage() {
                                         {paginatedBookings.length === 0 ? (
                                             <TableRow>
                                                 <TableCell colSpan={9} className="h-24 text-center">
-                                                    No bookings found.
+                                                    {searchQuery
+                                                        ? "No trips found matching your search."
+                                                        : "No scanned trips found for your company's vehicles."}
                                                 </TableCell>
                                             </TableRow>
                                         ) : (
@@ -431,9 +691,16 @@ export default function BookingsPage() {
                                                     <TableCell className="font-medium">{safeStr(booking.booking_number)}</TableCell>
                                                     <TableCell>{getFullName(booking.user)}</TableCell>
                                                     <TableCell>
-                                                        {booking.start_point?.name} → {booking.end_point?.name}
+                                                        {safeStr(booking.start_point?.name)} → {safeStr(booking.end_point?.name)}
                                                     </TableCell>
-                                                    <TableCell>{booking.vehicle?.name || "N/A"}</TableCell>
+                                                    <TableCell>
+                                                        <div>
+                                                            <div className="font-medium">{safeStr(booking.vehicle?.name) || "N/A"}</div>
+                                                            <div className="text-xs text-muted-foreground">
+                                                                {safeStr(booking.vehicle?.registration_number)}
+                                                            </div>
+                                                        </div>
+                                                    </TableCell>
                                                     <TableCell>
                                                         <div className="space-y-1">
                                                             {booking.has_percel ? (
@@ -458,14 +725,11 @@ export default function BookingsPage() {
                                                             {getScanningStatus(booking)}
                                                         </Badge>
                                                     </TableCell>
-                                                    <TableCell>{safeDate(booking.created_at)}</TableCell>
+                                                    <TableCell>{safeDate(booking.scanned_in_at)}</TableCell>
                                                     <TableCell>
                                                         <div className="flex space-x-2">
-                                                            <Button variant="ghost" size="sm" onClick={() => handleViewBooking(booking.id)}>
+                                                            <Button variant="ghost" size="sm" onClick={() => handleViewBooking(booking)}>
                                                                 <Eye className="h-4 w-4" />
-                                                            </Button>
-                                                            <Button variant="ghost" size="sm" onClick={() => openStatusDialog(booking)}>
-                                                                <RefreshCcw className="h-4 w-4" />
                                                             </Button>
                                                         </div>
                                                     </TableCell>
@@ -481,7 +745,7 @@ export default function BookingsPage() {
                                 <div className="flex items-center justify-between space-x-2 py-4">
                                     <div className="text-sm text-muted-foreground">
                                         Showing {startIndex + 1} to {Math.min(endIndex, filteredBookings.length)} of{" "}
-                                        {filteredBookings.length} bookings
+                                        {filteredBookings.length} trips
                                     </div>
                                     <div className="flex items-center space-x-2">
                                         <Button
@@ -536,22 +800,22 @@ export default function BookingsPage() {
             <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
                 <DialogContent className="sm:max-w-[600px]">
                     <DialogHeader>
-                        <DialogTitle>Booking Details</DialogTitle>
-                        <DialogDescription>Booking #{safeStr(selectedBooking?.booking_number)}</DialogDescription>
+                        <DialogTitle>Trip Details</DialogTitle>
+                        <DialogDescription>Trip #{safeStr(selectedBooking?.booking_number)}</DialogDescription>
                     </DialogHeader>
                     {selectedBooking && (
                         <div className="grid gap-4 py-4">
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <h3 className="font-medium text-sm text-muted-foreground">AgentAttachment Information</h3>
+                                    <h3 className="font-medium text-sm text-muted-foreground">Passenger Information</h3>
                                     <div className="flex items-center mt-1">
                                         <User className="h-4 w-4 mr-2 text-muted-foreground" />
                                         <p className="font-semibold">{getFullName(selectedBooking.user)}</p>
                                     </div>
-                                    <p className="text-sm mt-1">Type: {selectedBooking.type}</p>
+                                    <p className="text-sm mt-1">Type: {safeStr(selectedBooking.type)}</p>
                                 </div>
                                 <div>
-                                    <h3 className="font-medium text-sm text-muted-foreground">Booking Status</h3>
+                                    <h3 className="font-medium text-sm text-muted-foreground">Trip Status</h3>
                                     <div className="flex space-x-2 items-center mt-1">
                                         <Badge
                                             variant="outline"
@@ -578,20 +842,20 @@ export default function BookingsPage() {
                                             <p className="text-sm text-muted-foreground">Route</p>
                                         </div>
                                         <p className="font-medium">
-                                            {selectedBooking.start_point?.name} → {selectedBooking.end_point?.name}
+                                            {safeStr(selectedBooking.start_point?.name)} → {safeStr(selectedBooking.end_point?.name)}
                                         </p>
                                         <p className="text-xs text-muted-foreground mt-1">
-                                            {selectedBooking.start_point?.code} → {selectedBooking.end_point?.code}
+                                            {safeStr(selectedBooking.start_point?.code)} → {safeStr(selectedBooking.end_point?.code)}
                                         </p>
                                     </div>
                                     <div>
                                         <div className="flex items-center">
-                                            <Truck className="h-4 w-4 mr-2 text-muted-foreground" />
+                                            <Bus className="h-4 w-4 mr-2 text-muted-foreground" />
                                             <p className="text-sm text-muted-foreground">Vehicle</p>
                                         </div>
-                                        <p className="font-medium">{selectedBooking.vehicle?.name || "Not assigned"}</p>
+                                        <p className="font-medium">{safeStr(selectedBooking.vehicle?.name) || "Not assigned"}</p>
                                         <p className="text-xs text-muted-foreground mt-1">
-                                            {selectedBooking.vehicle?.registration_number || ""}
+                                            {safeStr(selectedBooking.vehicle?.registration_number)}
                                         </p>
                                     </div>
                                     <div>
@@ -633,12 +897,8 @@ export default function BookingsPage() {
                                         </>
                                     )}
                                     <div>
-                                        <p className="text-sm text-muted-foreground">Created At</p>
-                                        <p className="font-medium">{safeDate(selectedBooking.created_at)}</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-sm text-muted-foreground">Expires At</p>
-                                        <p className="font-medium">{safeDate(selectedBooking.expired_at)}</p>
+                                        <p className="text-sm text-muted-foreground">Scanned At</p>
+                                        <p className="font-medium">{safeDate(selectedBooking.scanned_in_at)}</p>
                                     </div>
                                 </div>
                             </div>
@@ -647,60 +907,6 @@ export default function BookingsPage() {
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setViewDialogOpen(false)}>
                             Close
-                        </Button>
-                        <Button
-                            onClick={() => {
-                                setViewDialogOpen(false)
-                                if (selectedBooking) {
-                                    openStatusDialog(selectedBooking)
-                                }
-                            }}
-                        >
-                            Update Status
-                        </Button>
-                    </DialogFooter>
-                </DialogContent>
-            </Dialog>
-
-            {/* Update Status Dialog */}
-            <Dialog open={statusDialogOpen} onOpenChange={setStatusDialogOpen}>
-                <DialogContent className="sm:max-w-[425px]">
-                    <DialogHeader>
-                        <DialogTitle>Update Booking Status</DialogTitle>
-                        <DialogDescription>
-                            Change the status for booking #{safeStr(selectedBooking?.booking_number)}
-                        </DialogDescription>
-                    </DialogHeader>
-                    <div className="grid gap-4 py-4">
-                        <div className="space-y-2">
-                            <p className="text-sm font-medium">Current Status</p>
-                            <Badge
-                                variant="outline"
-                                className={selectedBooking ? getStatusColor(selectedBooking.status || "", selectedBooking.used) : ""}
-                            >
-                                {selectedBooking ? getStatusText(selectedBooking) : ""}
-                            </Badge>
-                        </div>
-                        <div className="space-y-2">
-                            <p className="text-sm font-medium">New Status</p>
-                            <Select value={newStatus} onValueChange={setNewStatus}>
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select a new status" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="active">Active</SelectItem>
-                                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                                    <SelectItem value="deactivated">Deactivated</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
-                    <DialogFooter>
-                        <Button variant="outline" onClick={() => setStatusDialogOpen(false)}>
-                            Cancel
-                        </Button>
-                        <Button onClick={handleStatusChange} disabled={statusLoading}>
-                            {statusLoading ? "Updating..." : "Update Status"}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

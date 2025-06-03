@@ -7,35 +7,48 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
-import { SlidersHorizontal, Search } from "lucide-react"
+import {
+    Sheet,
+    SheetContent,
+    SheetDescription,
+    SheetFooter,
+    SheetHeader,
+    SheetTitle,
+    SheetTrigger,
+} from "@/components/ui/sheet"
+import { Search, Filter } from "lucide-react"
+import { Badge } from "@/components/ui/badge"
 
 type FilterOption = {
     id: string
     label: string
     type: "text" | "select" | "date" | "number"
-    options?: { value: string; label: string }[]
+    options?: { value: string | null; label: string }[]
 }
 
 interface TableFiltersProps {
-    onSearch: (term: string) => void
-    onFilterChange: (filters: any) => void
-    filterOptions?: FilterOption[]
+    onSearchChange: (term: string) => void
+    filterOptions?: { label: string; value: string | null }[]
+    filterValue?: string | null
+    onFilterChange?: (value: string | null) => void
+    filterLabel?: string
     searchPlaceholder?: string
 }
 
 export function TableFilters({
-                                 onSearch,
+                                 onSearchChange,
+                                 filterOptions = [],
+                                 filterValue = null,
                                  onFilterChange,
-                                 filterOptions = [], // Default to empty array
+                                 filterLabel = "Status",
                                  searchPlaceholder = "Search...",
                              }: TableFiltersProps) {
     const [searchTerm, setSearchTerm] = useState("")
-    const [filterValues, setFilterValues] = useState<Record<string, any>>({})
     const [isFilterOpen, setIsFilterOpen] = useState(false)
+    const [tempFilterValue, setTempFilterValue] = useState<string | null>(filterValue)
 
     const handleSearch = () => {
-        onSearch(searchTerm)
+        onSearchChange(searchTerm)
     }
 
     const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -44,26 +57,30 @@ export function TableFilters({
         }
     }
 
-    const handleFilterChange = (id: string, value: any) => {
-        setFilterValues((prev) => ({
-            ...prev,
-            [id]: value,
-        }))
-    }
-
     const applyFilters = () => {
-        onFilterChange(filterValues)
+        if (onFilterChange) {
+            onFilterChange(tempFilterValue)
+        }
         setIsFilterOpen(false)
     }
 
     const resetFilters = () => {
-        setFilterValues({})
-        onFilterChange({})
+        setTempFilterValue(null)
+        if (onFilterChange) {
+            onFilterChange(null)
+        }
         setIsFilterOpen(false)
     }
 
+    // Get the current filter label for display
+    const getCurrentFilterLabel = () => {
+        if (!filterValue) return "All"
+        const option = filterOptions.find((opt) => opt.value === filterValue)
+        return option ? option.label : "All"
+    }
+
     return (
-        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between mb-4">
             <div className="relative w-full sm:w-auto flex-1 max-w-sm">
                 <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -79,77 +96,56 @@ export function TableFilters({
                 <Button variant="outline" size="sm" onClick={handleSearch}>
                     Search
                 </Button>
-                {Array.isArray(filterOptions) && filterOptions.length > 0 && (
+
+                {filterOptions.length > 0 && (
                     <Sheet open={isFilterOpen} onOpenChange={setIsFilterOpen}>
                         <SheetTrigger asChild>
-                            <Button variant="outline" size="sm">
-                                <SlidersHorizontal className="h-4 w-4 mr-2" />
-                                Filters
+                            <Button variant="outline" size="sm" className="flex items-center gap-2">
+                                <Filter className="h-4 w-4" />
+                                <span className="hidden sm:inline">Filter</span>
+                                {filterValue && (
+                                    <Badge variant="secondary" className="ml-1">
+                                        {getCurrentFilterLabel()}
+                                    </Badge>
+                                )}
                             </Button>
                         </SheetTrigger>
                         <SheetContent>
                             <SheetHeader>
-                                <SheetTitle>Filters</SheetTitle>
+                                <SheetTitle>Filter Options</SheetTitle>
                                 <SheetDescription>Apply filters to narrow down your search results.</SheetDescription>
                             </SheetHeader>
-                            <div className="py-4">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                                    {Array.isArray(filterOptions) && filterOptions.length > 0 ? (
-                                        filterOptions.map((option) => (
-                                            <div key={option.id} className="space-y-2">
-                                                <Label htmlFor={option.id}>{option.label}</Label>
-                                                {option.type === "select" && option.options ? (
-                                                    <Select
-                                                        value={filterValues[option.id] || "all"}
-                                                        onValueChange={(value) => handleFilterChange(option.id, value)}
-                                                    >
-                                                        <SelectTrigger id={option.id}>
-                                                            <SelectValue placeholder={`Select ${option.label}`} />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="all">All</SelectItem>
-                                                            {option.options.map((opt) => (
-                                                                <SelectItem key={opt.value} value={opt.value}>
-                                                                    {opt.label}
-                                                                </SelectItem>
-                                                            ))}
-                                                        </SelectContent>
-                                                    </Select>
-                                                ) : option.type === "date" ? (
-                                                    <Input
-                                                        id={option.id}
-                                                        type="date"
-                                                        value={filterValues[option.id] || ""}
-                                                        onChange={(e) => handleFilterChange(option.id, e.target.value)}
-                                                    />
-                                                ) : option.type === "number" ? (
-                                                    <Input
-                                                        id={option.id}
-                                                        type="number"
-                                                        value={filterValues[option.id] || ""}
-                                                        onChange={(e) => handleFilterChange(option.id, e.target.value)}
-                                                    />
-                                                ) : (
-                                                    <Input
-                                                        id={option.id}
-                                                        type="text"
-                                                        value={filterValues[option.id] || ""}
-                                                        onChange={(e) => handleFilterChange(option.id, e.target.value)}
-                                                    />
-                                                )}
-                                            </div>
-                                        ))
-                                    ) : (
-                                        <div className="col-span-full text-center text-muted-foreground">No filter options available</div>
-                                    )}
+
+                            <div className="py-6">
+                                <div className="space-y-4">
+                                    <div className="space-y-2">
+                                        <Label htmlFor="filter-status">{filterLabel}</Label>
+                                        <Select
+                                            value={tempFilterValue || ""}
+                                            onValueChange={(value) => setTempFilterValue(value === "" ? null : value)}
+                                        >
+                                            <SelectTrigger id="filter-status">
+                                                <SelectValue placeholder={`Select ${filterLabel}`} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="all">All</SelectItem>
+                                                {filterOptions.map((option) => (
+                                                    <SelectItem key={option.value || "null"} value={option.value || "null"}>
+                                                        {option.label}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
                                 </div>
                             </div>
-                            <div className="flex justify-between mt-4">
+
+                            <SheetFooter>
                                 <Button variant="outline" onClick={resetFilters}>
                                     Reset
                                 </Button>
                                 <Button onClick={applyFilters}>Apply Filters</Button>
-                            </div>
+                            </SheetFooter>
                         </SheetContent>
                     </Sheet>
                 )}

@@ -1,9 +1,9 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { AdminSidebar } from "@/components/admin/AdminSidebar"
+import { BusOwnerSidebar } from "@/components/bus-owner/bus-owner-sidebar"
 import { Button } from "@/components/ui/button"
 import { Bell, HelpCircle, Mail, Menu } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -13,34 +13,53 @@ import { Toaster } from "@/components/ui/toaster"
 import { TitleProvider, useTitle } from "@/context/TitleContext"
 import { usePermissions } from "@/hooks/use-permissions"
 import { useRouter } from "next/navigation"
-import { useEffect } from "react"
 
 // Inner component that uses the title context
-function AdminLayoutInner({ children }: { children: React.ReactNode }) {
+function BusOwnerLayoutInner({ children }: { children: React.ReactNode }) {
     const isMobile = useIsMobile()
     const [sidebarOpen, setSidebarOpen] = useState(false)
     const { title } = useTitle()
     const { hasRole } = usePermissions()
     const router = useRouter()
+    const [isLoading, setIsLoading] = useState(true)
 
     // Check if user is a bus owner
     const isBusOwner = hasRole("Bus Owner")
 
-    // Redirect bus owners to their dedicated portal
     useEffect(() => {
-        if (isBusOwner) {
-            console.log("Bus owner detected in admin layout, redirecting to bus owner portal")
-            router.push("/bus-owner/dashboard")
-        }
+        // Give some time for permissions to load from localStorage
+        const timer = setTimeout(() => {
+            setIsLoading(false)
+
+            // Redirect non-bus owners to admin portal
+            if (!isBusOwner) {
+                console.log("Non-bus owner detected in bus owner layout, redirecting to admin portal")
+                router.push("/admin/dashboard")
+            }
+        }, 1000)
+
+        return () => clearTimeout(timer)
     }, [isBusOwner, router])
 
-    // Don't render anything while checking permissions
-    if (isBusOwner) {
+    // Show loading while permissions are being checked
+    if (isLoading) {
         return (
             <div className="flex items-center justify-center min-h-screen">
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                    <p className="text-muted-foreground">Redirecting to Bus Owner Portal...</p>
+                    <p className="text-muted-foreground">Loading permissions...</p>
+                </div>
+            </div>
+        )
+    }
+
+    // Don't render anything if not a bus owner (will redirect)
+    if (!isBusOwner) {
+        return (
+            <div className="flex items-center justify-center min-h-screen">
+                <div className="text-center">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                    <p className="text-muted-foreground">Redirecting to Admin Portal...</p>
                 </div>
             </div>
         )
@@ -61,11 +80,11 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
                         sidebarOpen ? "translate-x-0" : "-translate-x-full",
                     )}
                 >
-                    <AdminSidebar onClose={() => setSidebarOpen(false)} isMobile={true} />
+                    <BusOwnerSidebar onClose={() => setSidebarOpen(false)} isMobile={true} />
                 </div>
             ) : (
                 <div className="fixed inset-y-0 left-0 z-30 hidden lg:block">
-                    <AdminSidebar />
+                    <BusOwnerSidebar />
                 </div>
             )}
 
@@ -87,7 +106,7 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
                         </div>
 
                         <div className="flex items-center gap-2">
-                            <UserNav />
+                        <UserNav />
                         </div>
                     </div>
                 </header>
@@ -103,10 +122,10 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
 }
 
 // Wrapper component that provides the TitleContext
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
+export default function BusOwnerLayout({ children }: { children: React.ReactNode }) {
     return (
         <TitleProvider>
-            <AdminLayoutInner>{children}</AdminLayoutInner>
+            <BusOwnerLayoutInner>{children}</BusOwnerLayoutInner>
         </TitleProvider>
     )
 }

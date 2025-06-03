@@ -31,7 +31,7 @@ const generateDeviceId = (): string => {
   let hash = 0
   for (let i = 0; i < combinedInfo.length; i++) {
     const char = combinedInfo.charCodeAt(i)
-    hash = ((hash << 5) - hash) + char
+    hash = (hash << 5) - hash + char
     hash = hash & hash // Convert to 32bit integer
   }
 
@@ -76,16 +76,37 @@ const getCookie = (name: string): string | null => {
 const storeUserData = (user: User) => {
   if (typeof window === "undefined") return
   try {
+    console.log("Storing user data:", user)
+
     // Store basic user info
     localStorage.setItem("user_id", String(user.id))
     localStorage.setItem("user_name", `${user.first_name} ${user.last_name}`)
     localStorage.setItem("user_email", user.email)
     localStorage.setItem("user_type", user.type)
+
+    // Store company ID - check multiple possible locations
+    let companyId: number | null = null
+
+    if (user.company_id) {
+      companyId = user.company_id
+    } else if (user.company?.id) {
+      companyId = user.company.id
+    }
+
+    if (companyId) {
+      localStorage.setItem("user_company_id", String(companyId))
+      console.log("Stored company ID:", companyId)
+    } else {
+      console.warn("No company ID found in user data")
+    }
+
     // Store roles and permissions
     if (user.roles && user.roles.length > 0) {
       // Store role names
       const roleNames = user.roles.map((role) => role.name)
       localStorage.setItem("user_roles", JSON.stringify(roleNames))
+      console.log("Stored roles:", roleNames)
+
       // Store all permissions from all roles
       const allPermissions = new Set<string>()
       user.roles.forEach((role) => {
@@ -96,6 +117,7 @@ const storeUserData = (user: User) => {
         }
       })
       localStorage.setItem("user_permissions", JSON.stringify(Array.from(allPermissions)))
+      console.log("Stored permissions:", Array.from(allPermissions).length)
     }
   } catch (error) {
     console.error("Error storing user data:", error)
@@ -111,6 +133,7 @@ const clearUserData = () => {
   localStorage.removeItem("user_type")
   localStorage.removeItem("user_roles")
   localStorage.removeItem("user_permissions")
+  localStorage.removeItem("user_company_id")
   // Don't remove device_id as it should persist across logins
 }
 
@@ -122,11 +145,11 @@ export const login = async (credentials: LoginCredentials): Promise<AuthResponse
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Device-ID": deviceId // Pass device ID in headers
+      "X-Device-ID": deviceId, // Pass device ID in headers
     },
     body: JSON.stringify({
       ...credentials,
-      device_id: deviceId // Also include in body
+      device_id: deviceId, // Also include in body
     }),
   })
 
@@ -135,7 +158,9 @@ export const login = async (credentials: LoginCredentials): Promise<AuthResponse
 
     // Handle specific case where user has too many active devices
     if (response.status === 403 && errorData.code === "MAX_DEVICES_REACHED") {
-      throw new Error("You are already logged in on two devices. Please log out from one device before logging in again.")
+      throw new Error(
+          "You are already logged in on two devices. Please log out from one device before logging in again.",
+      )
     }
 
     throw new Error(errorData.message || "Login failed")
@@ -143,10 +168,13 @@ export const login = async (credentials: LoginCredentials): Promise<AuthResponse
 
   const data = (await response.json()) as AuthResponse
   if (data.success) {
+    console.log("Login successful, storing user data:", data.data.user)
+
     // Set cookies
     setCookie("token", data.data.token)
     setCookie("user_role", data.data.user.type)
     setCookie("user_email", data.data.user.email)
+
     // Store user data including roles and permissions
     storeUserData(data.data.user)
 
@@ -168,10 +196,10 @@ export const logout = async () => {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}`,
-          "X-Device-ID": deviceId
+          Authorization: `Bearer ${token}`,
+          "X-Device-ID": deviceId,
         },
-        body: JSON.stringify({ device_id: deviceId })
+        body: JSON.stringify({ device_id: deviceId }),
       })
     } catch (error) {
       console.error("Error during logout:", error)
@@ -264,7 +292,7 @@ export const validateToken = async (): Promise<boolean> => {
     const response = await fetch("/api/proxy/companies", {
       headers: {
         Authorization: `Bearer ${token}`,
-        "X-Device-ID": getDeviceId() // Include device ID with validation requests
+        "X-Device-ID": getDeviceId(), // Include device ID with validation requests
       },
     })
 
@@ -287,7 +315,7 @@ export const setupTokenValidation = () => {
     if (init && getToken()) {
       init.headers = {
         ...init.headers,
-        "X-Device-ID": getDeviceId()
+        "X-Device-ID": getDeviceId(),
       }
     }
 
@@ -311,10 +339,11 @@ export const setupTokenValidation = () => {
         const clonedResponse = response.clone()
         try {
           const data = await clonedResponse.json()
-          if (data.code === "MAX_DEVICES_REACHED" ||
-              (data.message && data.message.includes("device"))) {
+          if (data.code === "MAX_DEVICES_REACHED" || (data.message && data.message.includes("device"))) {
             console.log("Maximum device limit reached, logging out from this device")
-            alert("You have been logged out because you logged in on another device. Only two devices are allowed at the same time.")
+            alert(
+                "You have been logged out because you logged in on another device. Only two devices are allowed at the same time.",
+            )
             logout()
           }
         } catch (error) {
@@ -339,9 +368,9 @@ export const setupTokenValidation = () => {
       fetch("/api/proxy/companies", {
         headers: {
           Authorization: `Bearer ${token}`,
-          "X-Device-ID": getDeviceId()
+          "X-Device-ID": getDeviceId(),
         },
-      }).catch(err => console.error("Initial auth check failed:", err))
+      }).catch((err) => console.error("Initial auth check failed:", err))
     }
   }, 5000)
 

@@ -1,6 +1,6 @@
 "use client"
 
-import { Car, Calendar, Route, MapPin, Smartphone, Users, Zap } from "lucide-react"
+import { Bus, Ticket, Route, MapPin, Smartphone, Users, Zap } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
@@ -20,14 +20,14 @@ export function QuickActions({ isBusOwner = false, companyId }: QuickActionsProp
                 {
                     title: "View My Vehicles",
                     description: "Manage your company vehicles",
-                    icon: Car,
+                    icon: Bus,
                     href: "/vehicles",
                     color: "bg-blue-500",
                 },
                 {
                     title: "View Bookings",
                     description: "Check recent bookings",
-                    icon: Calendar,
+                    icon: Ticket,
                     href: "/bookings",
                     color: "bg-green-500",
                 },
@@ -53,14 +53,14 @@ export function QuickActions({ isBusOwner = false, companyId }: QuickActionsProp
             {
                 title: "Add Vehicle",
                 description: "Register a new vehicle",
-                icon: Car,
+                icon: Bus,
                 href: "/vehicles?action=add",
                 color: "bg-blue-500",
             },
             {
-                title: "Create Booking",
-                description: "Book a new trip",
-                icon: Calendar,
+                title: "View Bookings",
+                description: "Get a deepdive of your tickets",
+                icon: Ticket,
                 href: "/bookings?action=add",
                 color: "bg-green-500",
             },

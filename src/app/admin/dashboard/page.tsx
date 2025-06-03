@@ -1,11 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Calendar, Car, Download, LineChart, Loader2, Wallet, ChevronDown, FileText } from "lucide-react"
+import { Calendar, Car, Download, LineChart, Loader2, Wallet, ChevronDown, FileText, Building2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { CalendarDateRangePicker } from "@/components/dashboard/date-range-picker"
-import { RevenueDistribution } from "@/components/dashboard/revenue-distribution"
 import { useMobile } from "@/hooks/use-mobile"
 import { usePermissions } from "@/hooks/use-permissions"
 import { format } from "date-fns"
@@ -15,6 +14,8 @@ import { QuickActions } from "@/components/dashboard/quick-actions"
 import { motion } from "framer-motion"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { useToast } from "@/components/ui/use-toast"
+import { Badge } from "@/components/ui/badge"
+import { Separator } from "@/components/ui/separator"
 import type { DateRange } from "react-day-picker"
 import type { DashboardStats, Company, ExportFormat } from "@/types/dashboard"
 import {
@@ -23,18 +24,32 @@ import {
   getDefaultDateRange,
   setupTokenValidation,
   exportDashboardData,
+  getCompany,
 } from "@/lib/services/dashboard"
+import { RevenueDistribution } from "@/components/dashboard/revenue-distribution"
 
 export default function DashboardPage() {
   const isMobile = useMobile()
   const { toast } = useToast()
-  const { isBusOwner, companyId } = usePermissions()
+  const { hasRole, companyId } = usePermissions()
+
+  // Add this debug log
+  useEffect(() => {
+    console.log("Dashboard Debug Info:", {
+      isBusOwner: hasRole("Bus Owner"),
+      companyId,
+      userType: typeof window !== "undefined" ? localStorage.getItem("user_type") : null,
+    })
+  }, [hasRole, companyId])
+
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [companies, setCompanies] = useState<Company[]>([])
+  const [currentCompany, setCurrentCompany] = useState<Company | null>(null)
+  const [loadingCompany, setLoadingCompany] = useState(false)
   const [selectedCompany, setSelectedCompany] = useState<string>(
-      isBusOwner() && companyId ? companyId.toString() : "all",
+      hasRole("Bus Owner") && companyId ? companyId.toString() : "all",
   )
   const [dateRange, setDateRange] = useState<DateRange>(getDefaultDateRange())
   const [showFilters, setShowFilters] = useState(false)
@@ -46,14 +61,43 @@ export default function DashboardPage() {
     return cleanup
   }, [])
 
+  // Fetch current company details for bus owners
+  useEffect(() => {
+    if (hasRole("Bus Owner") && companyId) {
+      const fetchCompanyDetails = async () => {
+        setLoadingCompany(true)
+        try {
+          const response = await getCompany(companyId)
+          if (response.success) {
+            setCurrentCompany(response.data)
+          }
+        } catch (err) {
+          console.error("Error fetching company details:", err)
+          toast({
+            title: "Warning",
+            description: "Could not load company details.",
+            variant: "destructive",
+          })
+        } finally {
+          setLoadingCompany(false)
+        }
+      }
+
+      fetchCompanyDetails()
+    }
+  }, [hasRole, companyId, toast])
+
   // Fetch companies (only if not bus owner)
   useEffect(() => {
-    if (!isBusOwner()) {
+    console.log("Checking if should fetch companies:", { isBusOwner: hasRole("Bus Owner") })
+    if (!hasRole("Bus Owner")) {
       const fetchCompanies = async () => {
         try {
+          console.log("Fetching companies for admin user")
           const response = await getCompanies()
           if (response.success && Array.isArray(response.data)) {
             setCompanies(response.data)
+            console.log("Companies loaded:", response.data.length)
           }
         } catch (err) {
           console.error("Error fetching companies:", err)
@@ -66,8 +110,10 @@ export default function DashboardPage() {
       }
 
       fetchCompanies()
+    } else {
+      console.log("Bus owner detected, skipping companies fetch")
     }
-  }, [toast, isBusOwner])
+  }, [toast, hasRole])
 
   // Fetch dashboard stats
   useEffect(() => {
@@ -79,14 +125,42 @@ export default function DashboardPage() {
         const startDate = dateRange.from ? format(dateRange.from, "yyyy-MM-dd") : ""
         const endDate = dateRange.to ? format(dateRange.to, "yyyy-MM-dd") : ""
 
-        // For bus owners, always use their company ID
-        const companyFilter =
-            isBusOwner() && companyId ? companyId.toString() : selectedCompany === "all" ? undefined : selectedCompany
+        // Determine the company filter based on user permissions
+        let companyFilter: string | undefined
+
+        if (hasRole("Bus Owner")) {
+          // Bus owners are always restricted to their assigned company
+          if (companyId) {
+            companyFilter = companyId.toString()
+            console.log("Bus owner detected, using company ID:", companyFilter)
+          } else {
+            console.warn("Bus owner detected but no company ID found")
+            setError("Bus owner account is not properly configured with a company")
+            return
+          }
+        } else if (!hasRole("Bus Owner") && selectedCompany !== "all") {
+          // Admins can select any company or view all
+          companyFilter = selectedCompany
+          console.log("Admin selected company:", companyFilter)
+        } else {
+          // View all companies (admin only)
+          companyFilter = undefined
+          console.log("Viewing all companies data")
+        }
+
+        console.log("Fetching dashboard stats with params:", {
+          companyFilter,
+          startDate,
+          endDate,
+          isBusOwner: hasRole("Bus Owner"),
+          userCompanyId: companyId,
+        })
 
         const response = await getDashboardStats(companyFilter, startDate, endDate)
 
         if (response.success) {
           setStats(response.data)
+          console.log("Dashboard stats loaded successfully:", response.data)
         } else {
           throw new Error(response.message || "Failed to fetch dashboard statistics")
         }
@@ -101,7 +175,7 @@ export default function DashboardPage() {
     if (dateRange.from && dateRange.to) {
       fetchStats()
     }
-  }, [selectedCompany, dateRange, isBusOwner, companyId])
+  }, [selectedCompany, dateRange, hasRole, companyId])
 
   const handleDateRangeChange = (range: DateRange) => {
     if (range.from && range.to) {
@@ -110,8 +184,8 @@ export default function DashboardPage() {
   }
 
   const handleCompanyChange = (value: string) => {
-    // Bus owners cannot change company
-    if (!isBusOwner()) {
+    // Bus owners cannot change company - they're restricted to their assigned company
+    if (!hasRole("Bus Owner")) {
       setSelectedCompany(value)
     }
   }
@@ -121,18 +195,25 @@ export default function DashboardPage() {
 
     setIsExporting(true)
     try {
-      // @ts-ignore
       const startDate = dateRange.from ? format(dateRange.from, "yyyy-MM-dd") : ""
-      // @ts-ignore
       const endDate = dateRange.to ? format(dateRange.to, "yyyy-MM-dd") : ""
 
       if (!startDate || !endDate) {
         throw new Error("Please select a valid date range")
       }
 
-      // For bus owners, always use their company ID
-      const companyFilter =
-          isBusOwner() && companyId ? companyId.toString() : selectedCompany === "all" ? undefined : selectedCompany
+      // Use the same company filtering logic as dashboard stats
+      let companyFilter: string | undefined
+
+      if (hasRole("Bus Owner") && companyId) {
+        companyFilter = companyId.toString()
+      } else if (!hasRole("Bus Owner") && selectedCompany !== "all") {
+        companyFilter = selectedCompany
+      } else {
+        companyFilter = undefined
+      }
+
+      console.log("Exporting data with company filter:", companyFilter)
 
       const blob = await exportDashboardData(format, startDate, endDate, companyFilter)
 
@@ -144,8 +225,8 @@ export default function DashboardPage() {
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
       const companyName =
-          isBusOwner() && companyId
-              ? `company-${companyId}`
+          hasRole("Bus Owner") && currentCompany
+              ? currentCompany.name.toLowerCase().replace(/\s+/g, "-")
               : selectedCompany === "all"
                   ? "all-companies"
                   : companies
@@ -177,11 +258,46 @@ export default function DashboardPage() {
     }
   }
 
+  const getSelectedCompanyName = () => {
+    if (hasRole("Bus Owner") && currentCompany) {
+      return currentCompany.name
+    }
+    if (selectedCompany === "all") {
+      return "All Companies"
+    }
+    const company = companies.find((c) => c.id.toString() === selectedCompany)
+    return company?.name || "Unknown Company"
+  }
+
   return (
-      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 bg-background rounded-lg border border-border/40 shadow-sm">
+      <div className="flex-1 space-y-4 p-4 md:p-8 pt-6 bg-background">
         <div className="flex flex-col space-y-4">
+          {/* Header Section */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between space-y-2 sm:space-y-0">
-            <h2 className="text-2xl font-bold tracking-tight">Dashboard {isBusOwner() ? "- Bus Owner View" : ""}</h2>
+            <div className="space-y-1">
+              <h2 className="text-2xl font-bold tracking-tight">
+                {hasRole("Bus Owner") && currentCompany
+                    ? `${currentCompany.name} Dashboard`
+                    : hasRole("Bus Owner")
+                        ? "Bus Owner Dashboard"
+                        : "Admin Dashboard"}
+              </h2>
+              {hasRole("Bus Owner") && currentCompany && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Building2 className="h-4 w-4" />
+                    <span className="text-sm">{currentCompany.name}</span>
+                    <Badge variant="secondary" className="text-xs">
+                      Bus Owner
+                    </Badge>
+                  </div>
+              )}
+              {!hasRole("Bus Owner") && selectedCompany !== "all" && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Building2 className="h-4 w-4" />
+                    <span className="text-sm">{getSelectedCompanyName()}</span>
+                  </div>
+              )}
+            </div>
 
             {/* Mobile filters toggle */}
             {isMobile && (
@@ -199,14 +315,14 @@ export default function DashboardPage() {
             {/* Filters section - always visible on desktop, toggleable on mobile */}
             <div
                 className={`
-            flex flex-col gap-3 w-full sm:w-auto sm:flex-row sm:items-center 
-            ${isMobile && !showFilters ? "hidden" : "flex"}
-          `}
+              flex flex-col gap-3 w-full sm:w-auto sm:flex-row sm:items-center 
+              ${isMobile && !showFilters ? "hidden" : "flex"}
+            `}
             >
               <CalendarDateRangePicker value={dateRange} onChange={handleDateRangeChange} showPresets={true} />
 
               {/* Company selector - hidden for bus owners */}
-              {!isBusOwner() && (
+              {!hasRole("Bus Owner") && (
                   <Select value={selectedCompany} onValueChange={handleCompanyChange}>
                     <SelectTrigger className="w-full sm:w-[180px]">
                       <SelectValue placeholder="All Companies" />
@@ -256,8 +372,44 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          {/* Quick Actions - pass bus owner status */}
-          <QuickActions isBusOwner={isBusOwner()} companyId={companyId} />
+          {/* Company Details Section for Bus Owners */}
+          {hasRole("Bus Owner") && currentCompany && (
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}>
+                <Card className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 border-blue-200 dark:border-blue-800">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Building2 className="h-5 w-5 text-blue-600" />
+                      Company Overview
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-muted-foreground">Company Name</p>
+                        <p className="text-base font-semibold">{currentCompany.name}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-muted-foreground">Contact Email</p>
+                        <p className="text-base">{currentCompany.email || "Not provided"}</p>
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-sm font-medium text-muted-foreground">Phone Number</p>
+                        <p className="text-base">{currentCompany.phone_number || "Not provided"}</p>
+                      </div>
+                    </div>
+                    <Separator className="my-4" />
+                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                      <span>Company ID: {currentCompany.id}</span>
+                      <span>•</span>
+                      <span>Member since: {new Date(currentCompany.created_at).toLocaleDateString()}</span>
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+          )}
+
+          {/* Quick Actions - pass bus owner status and companyId */}
+          <QuickActions isBusOwner={hasRole("Bus Owner")} companyId={companyId} />
 
           {error && (
               <Alert variant="destructive">
@@ -276,7 +428,9 @@ export default function DashboardPage() {
               >
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
+                    <CardTitle className="text-sm font-medium">
+                      {hasRole("Bus Owner") ? "Company Revenue" : "Total Revenue"}
+                    </CardTitle>
                     <Wallet className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
@@ -295,8 +449,8 @@ export default function DashboardPage() {
                             })}
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            {isBusOwner()
-                                ? "Your company revenue"
+                            {hasRole("Bus Owner")
+                                ? `${currentCompany?.name || "Your company"} earnings`
                                 : `For period ${stats?.period.start_date} to ${stats?.period.end_date}`}
                           </p>
                         </>
@@ -312,7 +466,9 @@ export default function DashboardPage() {
               >
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Total Bookings</CardTitle>
+                    <CardTitle className="text-sm font-medium">
+                      {hasRole("Bus Owner") ? "Company Bookings" : "Total Bookings"}
+                    </CardTitle>
                     <Calendar className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
@@ -325,7 +481,9 @@ export default function DashboardPage() {
                         <>
                           <div className="text-2xl font-bold">{stats?.metrics.total_bookings.toLocaleString() || 0}</div>
                           <p className="text-xs text-muted-foreground">
-                            {isBusOwner() ? "Your company bookings" : `${stats?.metrics.bookings_per_day} per day`}
+                            {hasRole("Bus Owner")
+                                ? `${stats?.metrics.bookings_per_day || 0} bookings per day`
+                                : `${stats?.metrics.bookings_per_day} per day`}
                           </p>
                         </>
                     )}
@@ -340,7 +498,9 @@ export default function DashboardPage() {
               >
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Active Vehicles</CardTitle>
+                    <CardTitle className="text-sm font-medium">
+                      {hasRole("Bus Owner") ? "Fleet Size" : "Active Vehicles"}
+                    </CardTitle>
                     <Car className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
@@ -355,8 +515,8 @@ export default function DashboardPage() {
                             {stats?.metrics.total_active_vehicles.toLocaleString() || 0}
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            {isBusOwner()
-                                ? "Your fleet size"
+                            {hasRole("Bus Owner")
+                                ? "Active vehicles in your fleet"
                                 : `TZS ${Number.parseFloat(stats?.metrics.revenue_per_vehicle || "0").toLocaleString(
                                     "en-US",
                                     {
@@ -396,7 +556,9 @@ export default function DashboardPage() {
                               maximumFractionDigits: 2,
                             })}
                           </div>
-                          <p className="text-xs text-muted-foreground">Per booking</p>
+                          <p className="text-xs text-muted-foreground">
+                            {hasRole("Bus Owner") ? "Per booking in your routes" : "Per booking"}
+                          </p>
                         </>
                     )}
                   </CardContent>
@@ -412,7 +574,7 @@ export default function DashboardPage() {
                       startDate={dateRange.from ? format(dateRange.from, "yyyy-MM-dd") : undefined}
                       endDate={dateRange.to ? format(dateRange.to, "yyyy-MM-dd") : undefined}
                       companyId={
-                        isBusOwner() && companyId
+                        hasRole("Bus Owner") && companyId
                             ? companyId.toString()
                             : selectedCompany === "all"
                                 ? undefined

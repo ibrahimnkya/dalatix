@@ -25,6 +25,9 @@ import { validateToken } from "@/lib/auth"
 export interface Company {
     id: number
     name: string
+    email?: string
+    phone_number?: string
+    created_at: string
 }
 
 export interface DashboardStats {
@@ -32,6 +35,7 @@ export interface DashboardStats {
         start_date: string
         end_date: string
     }
+    company: Company | null
     metrics: {
         total_revenue: string
         total_bookings: number
@@ -47,7 +51,7 @@ const API_CACHE = new Map<string, { data: any; timestamp: number }>()
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes in milliseconds
 
 /**
- * Fetches dashboard statistics with caching
+ * Fetches dashboard statistics with caching and proper company filtering
  */
 export async function getDashboardStats(
     companyId?: string,
@@ -57,8 +61,10 @@ export async function getDashboardStats(
     try {
         const queryParams = new URLSearchParams()
 
+        // Always add company_id if provided and not "all"
         if (companyId && companyId !== "all") {
             queryParams.append("company_id", companyId)
+            console.log("Adding company_id to dashboard stats request:", companyId)
         }
 
         if (startDate) {
@@ -70,6 +76,7 @@ export async function getDashboardStats(
         }
 
         const url = `/api/proxy/reports/stats?${queryParams.toString()}`
+        console.log("Fetching dashboard stats from:", url)
 
         // Check if we have cached data
         const cacheKey = url
@@ -88,6 +95,7 @@ export async function getDashboardStats(
         }
 
         const data = await response.json()
+        console.log("Dashboard stats response:", data)
 
         // Cache the response
         API_CACHE.set(cacheKey, { data, timestamp: now })
@@ -95,6 +103,43 @@ export async function getDashboardStats(
         return data
     } catch (error) {
         console.error("Error fetching dashboard stats:", error)
+        throw error
+    }
+}
+
+/**
+ * Fetches a specific company by ID
+ */
+export async function getCompany(companyId: number): Promise<DashboardResponse> {
+    try {
+        const url = `/api/proxy/companies/${companyId}`
+        console.log("Fetching company from:", url)
+
+        // Check if we have cached data
+        const cacheKey = url
+        const cachedData = API_CACHE.get(cacheKey)
+        const now = Date.now()
+
+        if (cachedData && now - cachedData.timestamp < CACHE_DURATION) {
+            console.log("Using cached company data")
+            return cachedData.data
+        }
+
+        const response = await fetch(url)
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch company: ${response.status}`)
+        }
+
+        const data = await response.json()
+        console.log("Company response:", data)
+
+        // Cache the response
+        API_CACHE.set(cacheKey, { data, timestamp: now })
+
+        return data
+    } catch (error) {
+        console.error("Error fetching company:", error)
         throw error
     }
 }
@@ -135,7 +180,7 @@ export async function getCompanies() {
 }
 
 /**
- * Fetches revenue data for charts
+ * Fetches revenue data for charts with proper company filtering
  */
 export async function getRevenueData(
     startDate: string,
@@ -152,9 +197,11 @@ export async function getRevenueData(
 
         if (companyId && companyId !== "all") {
             queryParams.append("company_id", companyId)
+            console.log("Adding company_id to revenue request:", companyId)
         }
 
         const url = `/api/proxy/reports/revenue?${queryParams.toString()}`
+        console.log("Fetching revenue data from:", url)
 
         // Check if we have cached data
         const cacheKey = url
@@ -194,7 +241,7 @@ export async function getRevenueData(
 }
 
 // Replace the getBookingsDistribution function with this version
-export async function getBookingsDistribution(): Promise<{
+export async function getBookingsDistribution(companyId?: string): Promise<{
     success: boolean
     data: {
         status: BookingDistribution[]
@@ -203,8 +250,15 @@ export async function getBookingsDistribution(): Promise<{
     message?: string
 }> {
     try {
+        const queryParams = new URLSearchParams()
+
+        if (companyId && companyId !== "all") {
+            queryParams.append("company_id", companyId)
+            console.log("Adding company_id to bookings distribution request:", companyId)
+        }
+
         // Check if we have cached data
-        const cacheKey = "/api/proxy/reports/bookings-distribution"
+        const cacheKey = `/api/proxy/reports/bookings-distribution?${queryParams.toString()}`
         const cachedData = API_CACHE.get(cacheKey)
         const now = Date.now()
 
@@ -227,21 +281,24 @@ export async function getBookingsDistribution(): Promise<{
             }
 
             // If endpoint exists, proceed with actual data fetching
-            const statusResponse = await fetch("/api/proxy/reports/bookings-by-status")
+            const statusUrl = `/api/proxy/reports/bookings-by-status?${queryParams.toString()}`
+            const statusResponse = await fetch(statusUrl)
             if (!statusResponse.ok) {
                 throw new Error(`Failed to fetch bookings by status: ${statusResponse.status}`)
             }
             const statusData = await statusResponse.json()
 
-            // Fetch routes
-            const routesResponse = await fetch("/api/proxy/routes?paginate=false")
+            // Fetch routes with company filter
+            const routesUrl = `/api/proxy/routes?paginate=false&${queryParams.toString()}`
+            const routesResponse = await fetch(routesUrl)
             if (!routesResponse.ok) {
                 throw new Error(`Failed to fetch routes: ${routesResponse.status}`)
             }
             const routesData = await routesResponse.json()
 
-            // Fetch bookings by route
-            const routeBookingsResponse = await fetch("/api/proxy/reports/bookings-by-route")
+            // Fetch bookings by route with company filter
+            const routeBookingsUrl = `/api/proxy/reports/bookings-by-route?${queryParams.toString()}`
+            const routeBookingsResponse = await fetch(routeBookingsUrl)
             if (!routeBookingsResponse.ok) {
                 throw new Error(`Failed to fetch bookings by route: ${routeBookingsResponse.status}`)
             }
@@ -332,6 +389,7 @@ export async function getRevenueDistribution(
 
         if (companyId && companyId !== "all") {
             queryParams.append("company_id", companyId)
+            console.log("Adding company_id to revenue distribution request:", companyId)
         }
 
         if (startDate) {
@@ -343,6 +401,7 @@ export async function getRevenueDistribution(
         }
 
         const url = `/api/proxy/reports/stats?${queryParams.toString()}`
+        console.log("Fetching revenue distribution from:", url)
 
         // Check cache
         const cacheKey = url + "_distribution"
@@ -433,7 +492,11 @@ export async function getRevenueDistribution(
 
         // Try to get inactive vehicles count if available
         try {
-            const vehiclesResponse = await fetch("/api/proxy/vehicles/stats")
+            const vehiclesUrl =
+                companyId && companyId !== "all"
+                    ? `/api/proxy/vehicles/stats?company_id=${companyId}`
+                    : "/api/proxy/vehicles/stats"
+            const vehiclesResponse = await fetch(vehiclesUrl)
             if (vehiclesResponse.ok) {
                 const vehiclesData = await vehiclesResponse.json()
                 if (vehiclesData.success && vehiclesData.data) {
@@ -483,7 +546,94 @@ export async function getRevenueDistribution(
 }
 
 /**
- * Exports dashboard data to the specified format
+ * Calculates growth rate by comparing current period with previous period
+ */
+export async function calculateGrowthRate(
+    currentStartDate: string,
+    currentEndDate: string,
+    companyId?: string,
+): Promise<{
+    growthRate: number
+    currentRevenue: number
+    previousRevenue: number
+    periodComparison: {
+        current_period: number
+        previous_period: number
+        change_percentage: number
+    }
+}> {
+    try {
+        const currentStart = parseISO(currentStartDate)
+        const currentEnd = parseISO(currentEndDate)
+        const periodLength = Math.ceil((currentEnd.getTime() - currentStart.getTime()) / (1000 * 60 * 60 * 24))
+
+        // Calculate previous period dates (same length, immediately before current period)
+        const previousEnd = subDays(currentStart, 1)
+        const previousStart = subDays(previousEnd, periodLength)
+
+        console.log("Calculating growth rate for periods:", {
+            current: { start: currentStartDate, end: currentEndDate },
+            previous: { start: format(previousStart, "yyyy-MM-dd"), end: format(previousEnd, "yyyy-MM-dd") },
+            companyId,
+        })
+
+        // Fetch current period revenue
+        const currentStats = await getDashboardStats(companyId, currentStartDate, currentEndDate)
+
+        // Fetch previous period revenue
+        const previousStats = await getDashboardStats(
+            companyId,
+            format(previousStart, "yyyy-MM-dd"),
+            format(previousEnd, "yyyy-MM-dd"),
+        )
+
+        const currentRevenue = Number.parseFloat(currentStats?.data?.metrics?.total_revenue || "0")
+        const previousRevenue = Number.parseFloat(previousStats?.data?.metrics?.total_revenue || "0")
+
+        console.log("Growth rate calculation data:", {
+            currentRevenue,
+            previousRevenue,
+            currentSuccess: currentStats?.success,
+            previousSuccess: previousStats?.success,
+        })
+
+        // Calculate growth rate
+        let growthRate = 0
+        if (previousRevenue > 0) {
+            growthRate = ((currentRevenue - previousRevenue) / previousRevenue) * 100
+        } else if (currentRevenue > 0) {
+            growthRate = 100 // 100% growth if previous was 0 but current has revenue
+        }
+
+        const periodComparison = {
+            current_period: currentRevenue,
+            previous_period: previousRevenue,
+            change_percentage: growthRate,
+        }
+
+        return {
+            growthRate,
+            currentRevenue,
+            previousRevenue,
+            periodComparison,
+        }
+    } catch (error) {
+        console.error("Error calculating growth rate:", error)
+        return {
+            growthRate: 0,
+            currentRevenue: 0,
+            previousRevenue: 0,
+            periodComparison: {
+                current_period: 0,
+                previous_period: 0,
+                change_percentage: 0,
+            },
+        }
+    }
+}
+
+/**
+ * Exports dashboard data to the specified format with company filtering
  */
 export async function exportDashboardData(
     format: ExportFormat,
@@ -500,9 +650,12 @@ export async function exportDashboardData(
 
         if (companyId && companyId !== "all") {
             queryParams.append("company_id", companyId)
+            console.log("Adding company_id to export request:", companyId)
         }
 
         const url = `/api/proxy/reports/export?${queryParams.toString()}`
+        console.log("Exporting dashboard data from:", url)
+
         const response = await fetch(url)
 
         if (!response.ok) {

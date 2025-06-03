@@ -18,7 +18,7 @@ import {
   Settings,
   Smartphone,
   Ticket,
-  Truck,
+  Bus,
   Users,
   X,
 } from "lucide-react"
@@ -30,6 +30,7 @@ import { logout } from "@/lib/auth"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTitle, routeTitles } from "@/context/TitleContext"
 import { usePermissions } from "@/hooks/use-permissions"
+import { useRouter } from "next/navigation"
 
 interface NavItem {
   title: string
@@ -38,125 +39,63 @@ interface NavItem {
   submenu?: NavItem[]
 }
 
-const getNavItemsForUser = (
-    hasPermission: (permission: string | string[]) => boolean,
-    hasRole: (role: string | string[]) => boolean,
-    userType: string | null,
-) => {
-  const allNavItems: NavItem[] = [
-    {
-      title: "Dashboard",
-      href: "/admin/dashboard",
-      icon: LayoutDashboard,
-    },
-    {
-      title: "Companies",
-      href: "/admin/companies",
-      icon: Building2,
-    },
-    {
-      title: "Users",
-      href: "/admin/users",
-      icon: Users,
-    },
-    {
-      title: "Vehicles",
-      href: "/admin/vehicles",
-      icon: Truck,
-    },
-    {
-      title: "Bus Stops",
-      href: "/admin/bus-stops",
-      icon: MapPin,
-    },
-    {
-      title: "Routes",
-      href: "/admin/routes",
-      icon: Map,
-    },
-    {
-      title: "Bookings",
-      href: "/admin/bookings",
-      icon: Ticket,
-    },
-    {
-      title: "Devices",
-      href: "/admin/devices",
-      icon: Smartphone,
-    },
-    {
-      title: "Problems",
-      href: "/admin/problems",
-      icon: AlertCircle,
-    },
-    {
-      title: "Roles & Permissions",
-      href: "/admin/roles",
-      icon: Users,
-    },
-    {
-      title: "Settings",
-      href: "/admin/settings",
-      icon: Settings,
-    },
-  ]
-
-  // Special case: Admin user type with Bus Owner role should see bus owner items
-  if (userType === "Admin" && hasRole(["bus_owner", "Bus Owner"])) {
-    console.log("User is Admin with Bus Owner role, showing bus owner navigation items")
-    return allNavItems.filter((item) =>
-        ["Dashboard", "Vehicles", "Bus Stops", "Routes", "Bookings", "Devices", "Settings"].includes(item.title),
-    )
-  }
-
-  // If user is admin (without bus owner role), show all items
-  if (userType === "Admin" || hasRole("Administrator")) {
-    console.log("User is admin, showing all navigation items")
-    return allNavItems
-  }
-
-
-
-  // For other roles, filter based on specific permissions
-  console.log("User has custom permissions, filtering navigation items")
-  return allNavItems.filter((item) => {
-    switch (item.title) {
-      case "Dashboard":
-        return true // Dashboard is always accessible
-      case "Companies":
-        return hasPermission(["companies.view", "companies.manage", "view-companies", "manage-companies"])
-      case "Users":
-        return hasPermission(["users.view", "users.manage", "view-users", "manage-users"])
-      case "Vehicles":
-        return hasPermission(["vehicles.view", "vehicles.manage", "view-vehicles", "manage-vehicles"])
-      case "Bus Stops":
-        return hasPermission(["bus_stops.view", "bus_stops.manage", "view-bus-stops", "manage-bus-stops"])
-      case "Routes":
-        return hasPermission(["routes.view", "routes.manage", "view-routes", "manage-routes"])
-      case "Bookings":
-        return hasPermission(["bookings.view", "bookings.manage", "view-bookings", "manage-bookings"])
-      case "Devices":
-        return hasPermission(["devices.view", "devices.manage", "view-devices", "manage-devices"])
-      case "Problems":
-        return hasPermission(["problems.view", "problems.manage", "view-problems", "manage-problems"])
-      case "Roles & Permissions":
-        return hasPermission([
-          "roles.view",
-          "roles.manage",
-          "permissions.view",
-          "permissions.manage",
-          "view-roles",
-          "manage-roles",
-          "view-permissions",
-          "manage-permissions",
-        ])
-      case "Settings":
-        return hasPermission(["settings.view", "settings.manage", "view-settings", "manage-settings"])
-      default:
-        return false
-    }
-  })
-}
+const getAdminNavItems = (): NavItem[] => [
+  {
+    title: "Dashboard",
+    href: "/admin/dashboard",
+    icon: LayoutDashboard,
+  },
+  {
+    title: "Companies",
+    href: "/admin/companies",
+    icon: Building2,
+  },
+  {
+    title: "Users",
+    href: "/admin/users",
+    icon: Users,
+  },
+  {
+    title: "Vehicles",
+    href: "/admin/vehicles",
+    icon: Bus,
+  },
+  {
+    title: "Bus Stops",
+    href: "/admin/bus-stops",
+    icon: MapPin,
+  },
+  {
+    title: "Routes",
+    href: "/admin/routes",
+    icon: Map,
+  },
+  {
+    title: "Bookings",
+    href: "/admin/bookings",
+    icon: Ticket,
+  },
+  {
+    title: "Devices",
+    href: "/admin/devices",
+    icon: Smartphone,
+  },
+  {
+    title: "Problems",
+    href: "/admin/problems",
+    icon: AlertCircle,
+  },
+  {
+    title: "Roles & Permissions",
+    href: "/admin/roles",
+    icon: Users,
+  },
+  {
+    title: "Settings",
+    href: "/admin/settings",
+    icon: Settings,
+  },
+]
 
 interface AdminSidebarProps {
   onClose?: () => void
@@ -166,57 +105,22 @@ interface AdminSidebarProps {
 export function AdminSidebar({ onClose, isMobile: forceMobile }: AdminSidebarProps) {
   const isMobile = useIsMobile()
   const pathname = usePathname()
+  const router = useRouter()
   const [expanded, setExpanded] = React.useState(true)
   const [openMenus, setOpenMenus] = React.useState<Record<string, boolean>>({})
   const { setTitle } = useTitle()
   const { hasPermission, hasRole } = usePermissions()
-  const [userType, setUserType] = React.useState<string | null>(null)
 
-  // Get user type from localStorage or cookie on component mount
+  // Redirect bus owners to their dedicated portal
   React.useEffect(() => {
-    if (typeof window !== "undefined") {
-      // Try to get from localStorage first
-      const userTypeFromStorage = localStorage.getItem("user_type")
-      if (userTypeFromStorage) {
-        setUserType(userTypeFromStorage)
-        return
-      }
-
-      // Fallback to cookie
-      const getCookie = (name: string): string | null => {
-        const nameEQ = name + "="
-        const ca = document.cookie.split(";")
-        for (let i = 0; i < ca.length; i++) {
-          let c = ca[i]
-          while (c.charAt(0) === " ") c = c.substring(1, c.length)
-          if (c.indexOf(nameEQ) === 0) return c.substring(nameEQ.length, c.length)
-        }
-        return null
-      }
-
-      const userRoleFromCookie = getCookie("user_role")
-      if (userRoleFromCookie) {
-        setUserType(userRoleFromCookie)
-      }
+    if (hasRole("Bus Owner")) {
+      console.log("Bus owner detected, redirecting to bus owner portal")
+      router.push("/bus-owner/dashboard")
     }
-  }, [])
+  }, [hasRole, router])
 
-  // Get filtered navigation items based on user permissions and type
-  const navItems = React.useMemo(
-      () => getNavItemsForUser(hasPermission, hasRole, userType),
-      [hasPermission, hasRole, userType],
-  )
-
-  // Log permissions and roles for debugging
-  React.useEffect(() => {
-    console.log("User type:", userType)
-    console.log("Has Bus Owner role:", hasRole(["bus_owner", "Bus Owner"]))
-    console.log("Has Admin role:", hasRole("admin"))
-    console.log(
-        "Available navigation items:",
-        navItems.map((item) => item.title),
-    )
-  }, [userType, navItems, hasRole])
+  // Get admin navigation items
+  const navItems = React.useMemo(() => getAdminNavItems(), [])
 
   // Check if a path is active (exact match or starts with path for submenu items)
   const isPathActive = (href: string) => {
@@ -297,6 +201,11 @@ export function AdminSidebar({ onClose, isMobile: forceMobile }: AdminSidebarPro
     }
   }
 
+  // Don't render if user is a bus owner (they should be redirected)
+  if (hasRole("Bus Owner")) {
+    return null
+  }
+
   return (
       <aside className={cn("h-full bg-background border-r", isMobile ? "w-full" : expanded ? "w-64" : "w-[70px]")}>
         <div className="flex h-16 items-center justify-between border-b px-4">
@@ -331,6 +240,13 @@ export function AdminSidebar({ onClose, isMobile: forceMobile }: AdminSidebarPro
         )}
 
         <div className="flex flex-col h-[calc(100%-4rem)]">
+          {/* User Role Indicator */}
+          {/*{(expanded || isMobile) && (*/}
+          {/*    <div className="px-4 py-2 border-b bg-muted/30">*/}
+          {/*      <div className="text-xs text-muted-foreground">Administrator Account</div>*/}
+          {/*    </div>*/}
+          {/*)}*/}
+
           <nav className="flex-1 overflow-y-auto py-6 px-3">
             <TooltipProvider delayDuration={0}>
               <div className="space-y-2">
