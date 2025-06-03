@@ -9,7 +9,7 @@ import { RevenueDistribution } from "@/components/dashboard/revenue-distribution
 import { getDashboardStats } from "@/lib/services/dashboard"
 import { getCompanies } from "@/lib/services/company"
 import { LoadingSpinner } from "@/components/loading-spinner"
-import { usePermissions } from "@/hooks/use-permissions"
+import { getToken, getUserRoles } from "@/lib/auth"
 import { TrendingUp, TrendingDown, DollarSign, Users, Car, Calendar, Building2, AlertCircle } from "lucide-react"
 import { format, subDays } from "date-fns"
 import type { DateRange } from "react-day-picker"
@@ -33,21 +33,59 @@ interface Company {
 }
 
 export default function BusOwnerDashboard() {
-    const { companyId, hasRole } = usePermissions()
     const [stats, setStats] = useState<DashboardStats | null>(null)
     const [companies, setCompanies] = useState<Company[]>([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
+    const [companyId, setCompanyId] = useState<number | null>(null)
+    const [isBusOwner, setIsBusOwner] = useState(false)
     const [dateRange, setDateRange] = useState<DateRange | undefined>({
         from: subDays(new Date(), 30),
         to: new Date(),
     })
 
-    console.log("Bus Owner Dashboard Debug Info:", {
-        isBusOwner: hasRole("Bus Owner"),
-        companyId,
-        dateRange,
-    })
+    // Check authentication and permissions
+    useEffect(() => {
+        const checkAuth = () => {
+            const token = getToken()
+            if (!token) {
+                setError("No authentication token found")
+                setLoading(false)
+                return
+            }
+
+            // Check if user has Bus Owner role
+            const roles = getUserRoles()
+            const busOwnerRole = roles.includes("Bus Owner")
+            setIsBusOwner(busOwnerRole)
+
+            if (!busOwnerRole) {
+                setError("Bus owner permissions required to access this dashboard")
+                setLoading(false)
+                return
+            }
+
+            // Get company ID from localStorage
+            const storedCompanyId = localStorage.getItem("user_company_id")
+            console.log("Stored company ID:", storedCompanyId)
+
+            if (storedCompanyId && storedCompanyId !== "null" && storedCompanyId !== "undefined") {
+                const parsedCompanyId = Number.parseInt(storedCompanyId, 10)
+                if (!Number.isNaN(parsedCompanyId)) {
+                    setCompanyId(parsedCompanyId)
+                    console.log("Using company ID:", parsedCompanyId)
+                } else {
+                    setError("Invalid company ID format")
+                    setLoading(false)
+                }
+            } else {
+                setError("No company assigned to this bus owner account")
+                setLoading(false)
+            }
+        }
+
+        checkAuth()
+    }, [])
 
     const handleDateRangeChange = (newDateRange: DateRange | undefined) => {
         setDateRange(newDateRange)
@@ -55,15 +93,8 @@ export default function BusOwnerDashboard() {
 
     useEffect(() => {
         const fetchDashboardData = async () => {
-            if (!hasRole("Bus Owner")) {
-                setError("Access denied: Bus owner permissions required")
-                setLoading(false)
-                return
-            }
-
-            if (!companyId) {
-                setError("No company assigned to this bus owner account")
-                setLoading(false)
+            // Don't fetch if there's an error or no company ID
+            if (error || !companyId || !isBusOwner) {
                 return
             }
 
@@ -108,42 +139,47 @@ export default function BusOwnerDashboard() {
         }
 
         fetchDashboardData()
-    }, [dateRange, companyId, hasRole])
+    }, [dateRange, companyId, isBusOwner, error])
 
-    if (!hasRole("Bus Owner")) {
+    // Show access denied if user doesn't have bus owner role
+    if (error && error.includes("Bus owner permissions required")) {
         return (
             <div className="flex items-center justify-center min-h-[400px]">
                 <div className="text-center">
                     <AlertCircle className="h-12 w-12 text-destructive mx-auto mb-4" />
                     <h2 className="text-xl font-semibold mb-2">Access Denied</h2>
                     <p className="text-muted-foreground">Bus owner permissions required to access this dashboard.</p>
+                    <Button onClick={() => window.location.reload()} className="mt-4" variant="outline">
+                        Refresh Page
+                    </Button>
                 </div>
             </div>
         )
     }
 
-    if (!companyId) {
+    // Show no company assigned error
+    if (error && error.includes("No company assigned")) {
         return (
             <div className="flex items-center justify-center min-h-[400px]">
                 <div className="text-center">
                     <Building2 className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
                     <h2 className="text-xl font-semibold mb-2">No Company Assigned</h2>
-                    <p className="text-muted-foreground">
+                    <p className="text-muted-foreground mb-4">
                         Please contact your administrator to assign a company to your account.
                     </p>
+                    <div className="space-y-2 text-sm text-muted-foreground">
+                        <p>User Roles: {getUserRoles().join(", ")}</p>
+                        <p>Company ID in storage: {localStorage.getItem("user_company_id") || "None"}</p>
+                    </div>
+                    <Button onClick={() => window.location.reload()} className="mt-4" variant="outline">
+                        Refresh Page
+                    </Button>
                 </div>
             </div>
         )
     }
 
-    if (loading) {
-        return (
-            <div className="flex items-center justify-center min-h-[400px]">
-                <LoadingSpinner />
-            </div>
-        )
-    }
-
+    // Show other errors
     if (error) {
         return (
             <div className="flex items-center justify-center min-h-[400px]">
@@ -153,6 +189,14 @@ export default function BusOwnerDashboard() {
                     <p className="text-muted-foreground mb-4">{error}</p>
                     <Button onClick={() => window.location.reload()}>Try Again</Button>
                 </div>
+            </div>
+        )
+    }
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-[400px]">
+                <LoadingSpinner />
             </div>
         )
     }

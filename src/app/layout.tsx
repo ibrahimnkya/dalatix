@@ -4,6 +4,7 @@ import { Geist, Geist_Mono } from "next/font/google"
 import "./globals.css"
 import QueryProvider from "../providers/QueryProvider"
 import { ThemeProvider } from "@/components/theme-provider"
+import { RoleBasedRouting } from "@/components/auth/role-based-routing"
 
 const geistSans = Geist({
     variable: "--font-geist-sans",
@@ -33,7 +34,9 @@ export default function RootLayout({
         <html lang="en" suppressHydrationWarning>
         <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen bg-background`}>
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
-            <QueryProvider>{children}</QueryProvider>
+            <QueryProvider>
+                <RoleBasedRouting>{children}</RoleBasedRouting>
+            </QueryProvider>
         </ThemeProvider>
         </body>
         </html>

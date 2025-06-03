@@ -3,16 +3,16 @@
 import type React from "react"
 import Image from "next/image"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { motion, AnimatePresence } from "framer-motion"
-import {Eye, EyeOff, Loader2, CheckCircle2, ShieldCheck} from "lucide-react"
+import { Eye, EyeOff, Loader2, CheckCircle2, ShieldCheck } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { login } from "@/lib/auth"
+import { login, hasRole } from "@/lib/auth"
 
 export default function LoginPage() {
   const router = useRouter()
@@ -21,35 +21,82 @@ export default function LoginPage() {
   const [error, setError] = useState("")
   const [showPassword, setShowPassword] = useState(false)
 
+  // Check if user is already logged in and redirect accordingly
+  useEffect(() => {
+    const checkExistingAuth = () => {
+      try {
+        if (hasRole("Bus Owner")) {
+          router.replace("/bus-owner/dashboard")
+          return
+        }
+
+        if (hasRole("Admin") || hasRole("Super Admin") || hasRole("System Admin")) {
+          router.replace("/admin/dashboard")
+          return
+        }
+      } catch (error) {
+        // User not logged in, stay on login page
+        console.log("No existing auth found")
+      }
+    }
+
+    checkExistingAuth()
+  }, [router])
+
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     setIsLoading(true)
     setError("")
 
     const formData = new FormData(e.currentTarget)
-    const email = formData.get("email") as string
+    const identifier = formData.get("email") as string // Get email but send as identifier
     const password = formData.get("password") as string
 
     try {
       // Simulate a slight delay for better UX
       await new Promise((resolve) => setTimeout(resolve, 800))
 
-      const response = await login({ identifier: email, password })
-      console.log("Login response:", response) // Debug log
+      const response = await login({ identifier, password }) // Use identifier instead of email
+      console.log("Login response:", response)
 
-      if (response.success && response.data?.user?.type === "Admin") {
+      if (response.success && response.data?.user) {
         setIsSuccess(true)
-        // Wait for success animation before redirecting
+
+        // Wait for success animation, then redirect based on role
         setTimeout(() => {
-          router.push("/admin/dashboard")
+          // Check user roles from the response
+          const user = response.data.user
+          const userRoles = user.roles?.map((role) => role.name) || []
+
+          console.log("User roles:", userRoles)
+
+          // Redirect based on role priority
+          if (userRoles.includes("Bus Owner")) {
+            console.log("Redirecting bus owner to bus-owner dashboard")
+            router.replace("/bus-owner/dashboard")
+          } else if (
+              userRoles.includes("Admin") ||
+              userRoles.includes("Super Admin") ||
+              userRoles.includes("System Admin")
+          ) {
+            console.log("Redirecting admin to admin dashboard")
+            router.replace("/admin/dashboard")
+          } else {
+            // Fallback based on user type
+            if (user.type === "Bus Owner") {
+              router.replace("/bus-owner/dashboard")
+            } else {
+              router.replace("/admin/dashboard")
+            }
+          }
         }, 1000)
       } else {
-        setError("Access denied. Admin privileges required.")
+        setError("Login failed. Please check your credentials.")
         setIsLoading(false)
       }
     } catch (err) {
       console.error("Login error:", err)
-      setError("Invalid email or password")
+      setError(err instanceof Error ? err.message : "Invalid email or password")
       setIsLoading(false)
     }
   }
@@ -131,7 +178,7 @@ export default function LoginPage() {
                   <CheckCircle2 className="h-12 w-12 text-yellow-500" />
                 </div>
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">Login Successful!</h2>
-                <p className="text-gray-600 mb-4">Redirecting to dashboard...</p>
+                <p className="text-gray-600 mb-4">Redirecting to your dashboard...</p>
                 <div className="relative h-1 w-48 bg-gray-200 rounded-full overflow-hidden">
                   <motion.div
                       className="absolute top-0 left-0 h-full bg-yellow-500"
@@ -159,7 +206,7 @@ export default function LoginPage() {
                           width={180}
                           height={100}
                           className="rounded-xs mx-auto mb-4"
-                          />
+                      />
                     </motion.div>
                     <motion.div variants={itemVariants} custom={1}>
                       <CardTitle className="text-2xl font-bold text-center">Welcome back</CardTitle>
@@ -254,7 +301,7 @@ export default function LoginPage() {
 
                       <motion.div variants={itemVariants} custom={5} className="text-center text-sm text-gray-500 mt-4">
                         <div className="flex items-center justify-center mb-2">
-                          <ShieldCheck/>
+                          <ShieldCheck />
                           <p> Secure login provided by MySafari</p>
                         </div>
                       </motion.div>

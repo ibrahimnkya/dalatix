@@ -5,46 +5,17 @@ import { useState } from "react"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { AdminSidebar } from "@/components/admin/AdminSidebar"
 import { Button } from "@/components/ui/button"
-import { Bell, HelpCircle, Mail, Menu } from "lucide-react"
+import { Menu } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { Badge } from "@/components/ui/badge"
 import { UserNav } from "@/components/dashboard/user-nav"
 import { Toaster } from "@/components/ui/toaster"
 import { TitleProvider, useTitle } from "@/context/TitleContext"
-import { usePermissions } from "@/hooks/use-permissions"
-import { useRouter } from "next/navigation"
-import { useEffect } from "react"
 
 // Inner component that uses the title context
 function AdminLayoutInner({ children }: { children: React.ReactNode }) {
     const isMobile = useIsMobile()
     const [sidebarOpen, setSidebarOpen] = useState(false)
     const { title } = useTitle()
-    const { hasRole } = usePermissions()
-    const router = useRouter()
-
-    // Check if user is a bus owner
-    const isBusOwner = hasRole("Bus Owner")
-
-    // Redirect bus owners to their dedicated portal
-    useEffect(() => {
-        if (isBusOwner) {
-            console.log("Bus owner detected in admin layout, redirecting to bus owner portal")
-            router.push("/bus-owner/dashboard")
-        }
-    }, [isBusOwner, router])
-
-    // Don't render anything while checking permissions
-    if (isBusOwner) {
-        return (
-            <div className="flex items-center justify-center min-h-screen">
-                <div className="text-center">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-                    <p className="text-muted-foreground">Redirecting to Bus Owner Portal...</p>
-                </div>
-            </div>
-        )
-    }
 
     return (
         <div className="h-screen w-screen overflow-hidden bg-background">
@@ -82,7 +53,6 @@ function AdminLayoutInner({ children }: { children: React.ReactNode }) {
 
                     <div className="flex flex-1 items-center justify-between">
                         <div className="flex items-center gap-2 font-semibold">
-                            {/* Display the dynamic title here */}
                             <span>{title}</span>
                         </div>
 

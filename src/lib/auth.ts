@@ -1,7 +1,7 @@
 import type { User } from "@/types/user"
 
 export interface LoginCredentials {
-  email: string
+  identifier: string // Changed from email to identifier
   password: string
 }
 
@@ -141,6 +141,11 @@ export const login = async (credentials: LoginCredentials): Promise<AuthResponse
   // Get device ID for this device
   const deviceId = getDeviceId()
 
+  console.log("Sending login request with:", {
+    identifier: credentials.identifier,
+    device_id: deviceId,
+  })
+
   const response = await fetch(`/api/proxy/login`, {
     method: "POST",
     headers: {
@@ -148,13 +153,15 @@ export const login = async (credentials: LoginCredentials): Promise<AuthResponse
       "X-Device-ID": deviceId, // Pass device ID in headers
     },
     body: JSON.stringify({
-      ...credentials,
+      identifier: credentials.identifier, // Use identifier instead of email
+      password: credentials.password,
       device_id: deviceId, // Also include in body
     }),
   })
 
   if (!response.ok) {
     const errorData = await response.json()
+    console.error("Login API error:", errorData)
 
     // Handle specific case where user has too many active devices
     if (response.status === 403 && errorData.code === "MAX_DEVICES_REACHED") {
@@ -167,6 +174,8 @@ export const login = async (credentials: LoginCredentials): Promise<AuthResponse
   }
 
   const data = (await response.json()) as AuthResponse
+  console.log("Login API response:", data)
+
   if (data.success) {
     console.log("Login successful, storing user data:", data.data.user)
 

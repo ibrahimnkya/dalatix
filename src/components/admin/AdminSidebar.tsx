@@ -15,7 +15,6 @@ import {
   Map,
   MapPin,
   Package,
-  Settings,
   Smartphone,
   Ticket,
   Bus,
@@ -29,8 +28,6 @@ import { useIsMobile } from "@/hooks/use-mobile"
 import { logout } from "@/lib/auth"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useTitle, routeTitles } from "@/context/TitleContext"
-import { usePermissions } from "@/hooks/use-permissions"
-import { useRouter } from "next/navigation"
 
 interface NavItem {
   title: string
@@ -90,11 +87,6 @@ const getAdminNavItems = (): NavItem[] => [
     href: "/admin/roles",
     icon: Users,
   },
-  // {
-  //   title: "Settings",
-  //   href: "/admin/settings",
-  //   icon: Settings,
-  // },
 ]
 
 interface AdminSidebarProps {
@@ -105,19 +97,9 @@ interface AdminSidebarProps {
 export function AdminSidebar({ onClose, isMobile: forceMobile }: AdminSidebarProps) {
   const isMobile = useIsMobile()
   const pathname = usePathname()
-  const router = useRouter()
   const [expanded, setExpanded] = React.useState(true)
   const [openMenus, setOpenMenus] = React.useState<Record<string, boolean>>({})
   const { setTitle } = useTitle()
-  const { hasPermission, hasRole } = usePermissions()
-
-  // Redirect bus owners to their dedicated portal
-  React.useEffect(() => {
-    if (hasRole("Bus Owner")) {
-      console.log("Bus owner detected, redirecting to bus owner portal")
-      router.push("/bus-owner/dashboard")
-    }
-  }, [hasRole, router])
 
   // Get admin navigation items
   const navItems = React.useMemo(() => getAdminNavItems(), [])
@@ -192,18 +174,11 @@ export function AdminSidebar({ onClose, isMobile: forceMobile }: AdminSidebarPro
     logout()
   }
 
-  const handleLinkClick = (itemTitle: string) => {
-    // Update title when clicking on a link
-    setTitle(itemTitle)
-
+  // Simple function to close mobile sidebar
+  const handleMobileLinkClick = () => {
     if (isMobile && onClose) {
       onClose()
     }
-  }
-
-  // Don't render if user is a bus owner (they should be redirected)
-  if (hasRole("Bus Owner")) {
-    return null
   }
 
   return (
@@ -240,13 +215,6 @@ export function AdminSidebar({ onClose, isMobile: forceMobile }: AdminSidebarPro
         )}
 
         <div className="flex flex-col h-[calc(100%-4rem)]">
-          {/* User Role Indicator */}
-          {/*{(expanded || isMobile) && (*/}
-          {/*    <div className="px-4 py-2 border-b bg-muted/30">*/}
-          {/*      <div className="text-xs text-muted-foreground">Administrator Account</div>*/}
-          {/*    </div>*/}
-          {/*)}*/}
-
           <nav className="flex-1 overflow-y-auto py-6 px-3">
             <TooltipProvider delayDuration={0}>
               <div className="space-y-2">
@@ -311,7 +279,7 @@ export function AdminSidebar({ onClose, isMobile: forceMobile }: AdminSidebarPro
                                         <Link
                                             key={subItem.title}
                                             href={subItem.href}
-                                            onClick={() => handleLinkClick(subItem.title)}
+                                            onClick={handleMobileLinkClick}
                                             className={cn(
                                                 "flex items-center gap-2 rounded-md px-4 py-3 text-sm font-medium transition-colors",
                                                 isSubActive ? "bg-secondary text-primary" : "hover:bg-muted/50",
@@ -335,7 +303,6 @@ export function AdminSidebar({ onClose, isMobile: forceMobile }: AdminSidebarPro
                                           <Link
                                               key={subItem.title}
                                               href={subItem.href}
-                                              onClick={() => handleLinkClick(subItem.title)}
                                               className={cn(
                                                   "flex items-center gap-2 rounded-md px-3 py-3 text-sm font-medium transition-colors",
                                                   isSubActive ? "bg-secondary text-primary" : "hover:bg-muted/50",
@@ -358,7 +325,7 @@ export function AdminSidebar({ onClose, isMobile: forceMobile }: AdminSidebarPro
                       <Link
                           key={item.title}
                           href={item.href}
-                          onClick={() => handleLinkClick(item.title)}
+                          onClick={handleMobileLinkClick}
                           className={cn(
                               "flex items-center gap-2 rounded-md px-3 py-3 text-sm font-medium transition-colors",
                               isPathActive(item.href) ? "bg-secondary text-primary" : "hover:bg-muted/50",
@@ -372,7 +339,6 @@ export function AdminSidebar({ onClose, isMobile: forceMobile }: AdminSidebarPro
                         <TooltipTrigger asChild>
                           <Link
                               href={item.href}
-                              onClick={() => handleLinkClick(item.title)}
                               className={cn(
                                   "flex h-10 w-10 items-center justify-center rounded-md transition-colors",
                                   isPathActive(item.href) ? "bg-secondary text-primary" : "hover:bg-muted/50",
