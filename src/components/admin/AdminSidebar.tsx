@@ -90,11 +90,11 @@ const getAdminNavItems = (): NavItem[] => [
     href: "/admin/roles",
     icon: Users,
   },
-  {
-    title: "Settings",
-    href: "/admin/settings",
-    icon: Settings,
-  },
+  // {
+  //   title: "Settings",
+  //   href: "/admin/settings",
+  //   icon: Settings,
+  // },
 ]
 
 interface AdminSidebarProps {
