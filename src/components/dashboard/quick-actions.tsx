@@ -59,7 +59,7 @@ export function QuickActions({ isBusOwner = false, companyId }: QuickActionsProp
             },
             {
                 title: "View Bookings",
-                description: "Get a deepdive of your tickets",
+                description: "Get a deep-dive",
                 icon: Ticket,
                 href: "/bookings?action=add",
                 color: "bg-green-500",

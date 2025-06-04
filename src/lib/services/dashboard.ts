@@ -51,7 +51,7 @@ const API_CACHE = new Map<string, { data: any; timestamp: number }>()
 const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes in milliseconds
 
 /**
- * Fetches dashboard statistics with caching and proper company filtering
+ * Fetches dashboard statistics with proper API endpoints and company filtering
  */
 export async function getDashboardStats(
     companyId?: string,
@@ -59,51 +59,324 @@ export async function getDashboardStats(
     endDate?: string,
 ): Promise<DashboardResponse> {
     try {
-        const queryParams = new URLSearchParams()
+        console.log("Fetching dashboard stats with params:", { companyId, startDate, endDate })
 
-        // Always add company_id if provided and not "all"
-        if (companyId && companyId !== "all") {
-            queryParams.append("company_id", companyId)
-            console.log("Adding company_id to dashboard stats request:", companyId)
+        // For admin users, if they want to see all companies data, use aggregated approach
+        if (!companyId || companyId === "all") {
+            return await getAggregatedDashboardStats(startDate, endDate)
         }
 
-        if (startDate) {
-            queryParams.append("start_date", startDate)
-        }
-
-        if (endDate) {
-            queryParams.append("end_date", endDate)
-        }
-
-        const url = `/api/proxy/reports/stats?${queryParams.toString()}`
-        console.log("Fetching dashboard stats from:", url)
-
-        // Check if we have cached data
-        const cacheKey = url
-        const cachedData = API_CACHE.get(cacheKey)
-        const now = Date.now()
-
-        if (cachedData && now - cachedData.timestamp < CACHE_DURATION) {
-            console.log("Using cached dashboard stats")
-            return cachedData.data
-        }
-
-        const response = await fetch(url)
-
-        if (!response.ok) {
-            throw new Error(`Failed to fetch dashboard statistics: ${response.status}`)
-        }
-
-        const data = await response.json()
-        console.log("Dashboard stats response:", data)
-
-        // Cache the response
-        API_CACHE.set(cacheKey, { data, timestamp: now })
-
-        return data
+        // For specific company (admin selecting a company or bus owner), use the bus owner approach
+        return await getBusOwnerDashboardStats(companyId, startDate, endDate)
     } catch (error) {
         console.error("Error fetching dashboard stats:", error)
-        throw error
+        return {
+            success: false,
+            data: null,
+            message: error instanceof Error ? error.message : "Failed to fetch dashboard statistics",
+        }
+    }
+}
+
+/**
+ * Fetches aggregated dashboard statistics for all companies (admin view)
+ */
+export async function getAggregatedDashboardStats(startDate?: string, endDate?: string): Promise<DashboardResponse> {
+    try {
+        console.log("Fetching aggregated dashboard stats for all companies")
+
+        // Initialize metrics with default values
+        const metrics = {
+            total_revenue: "0",
+            total_bookings: 0,
+            total_active_vehicles: 0,
+            average_fare: "0",
+            revenue_per_vehicle: "0",
+            bookings_per_day: "0",
+        }
+
+        // Fetch all companies first
+        let allCompanies: any[] = []
+        try {
+            const companiesResponse = await fetch("/api/proxy/companies")
+            if (companiesResponse.ok) {
+                const companiesData = await companiesResponse.json()
+                if (companiesData.success && Array.isArray(companiesData.data)) {
+                    allCompanies = companiesData.data
+                }
+            }
+        } catch (error) {
+            console.warn("Could not fetch companies:", error)
+        }
+
+        // Fetch bookings data for all companies
+        let allBookings: any[] = []
+        try {
+            const params = new URLSearchParams()
+            params.set("start_date", startDate || format(subDays(new Date(), 30), "yyyy-MM-dd"))
+            params.set("end_date", endDate || format(new Date(), "yyyy-MM-dd"))
+            params.set("paginate", "false")
+
+            const bookingsResponse = await fetch(`/api/proxy/bookings/by_date_range?${params}`)
+            if (bookingsResponse.ok) {
+                const bookingsData = await bookingsResponse.json()
+                if (bookingsData.success) {
+                    if (bookingsData.data && bookingsData.data.data && Array.isArray(bookingsData.data.data)) {
+                        allBookings = bookingsData.data.data
+                    } else if (Array.isArray(bookingsData.data)) {
+                        allBookings = bookingsData.data
+                    }
+                }
+            }
+        } catch (error) {
+            console.warn("Could not fetch bookings data:", error)
+        }
+
+        // Filter bookings to only include scanned-in bookings (realistic data)
+        const validBookings = allBookings.filter((booking) => booking.scanned_in_at)
+
+        // Calculate metrics from all valid bookings
+        metrics.total_bookings = validBookings.length
+
+        // Calculate total revenue
+        const totalRevenue = validBookings.reduce((sum, booking) => {
+            const fare = Number.parseFloat(booking.fare || "0")
+            const parcelFare = booking.has_percel ? Number.parseFloat(booking.percel_fare || "0") : 0
+            return sum + fare + parcelFare
+        }, 0)
+        metrics.total_revenue = totalRevenue.toString()
+
+        // Calculate average fare
+        if (validBookings.length > 0) {
+            metrics.average_fare = (totalRevenue / validBookings.length).toString()
+        }
+
+        // Fetch all vehicles across all companies
+        let allVehicles: any[] = []
+        try {
+            const vehiclesResponse = await fetch("/api/proxy/vehicles?per_page=1000")
+            if (vehiclesResponse.ok) {
+                const vehiclesData = await vehiclesResponse.json()
+                if (vehiclesData.success && Array.isArray(vehiclesData.data)) {
+                    allVehicles = vehiclesData.data
+                }
+            }
+        } catch (error) {
+            console.warn("Could not fetch vehicles data:", error)
+        }
+
+        // Count active vehicles
+        const activeVehicles = allVehicles.filter(
+            (vehicle) =>
+                vehicle.status === "active" || vehicle.is_active === true || vehicle.active === true || !vehicle.status,
+        )
+        metrics.total_active_vehicles = activeVehicles.length
+
+        // Calculate revenue per vehicle
+        if (activeVehicles.length > 0) {
+            metrics.revenue_per_vehicle = (totalRevenue / activeVehicles.length).toString()
+        }
+
+        // Calculate bookings per day
+        if (startDate && endDate) {
+            const start = new Date(startDate)
+            const end = new Date(endDate)
+            const daysDiff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1
+            metrics.bookings_per_day = (validBookings.length / daysDiff).toString()
+        }
+
+        const result = {
+            success: true,
+            data: {
+                period: {
+                    start_date: startDate || "",
+                    end_date: endDate || "",
+                },
+                company: null, // No specific company for aggregated view
+                metrics,
+            },
+            message: "Aggregated dashboard statistics fetched successfully",
+        }
+
+        console.log("Final aggregated dashboard stats result:", result)
+        return result
+    } catch (error) {
+        console.error("Error fetching aggregated dashboard stats:", error)
+        return {
+            success: false,
+            data: null,
+            message: error instanceof Error ? error.message : "Failed to fetch aggregated dashboard statistics",
+        }
+    }
+}
+
+/**
+ * Fetches dashboard statistics specifically for bus owners using the same filtering logic as bookings
+ */
+export async function getBusOwnerDashboardStats(
+    companyId: string,
+    startDate?: string,
+    endDate?: string,
+): Promise<DashboardResponse> {
+    try {
+        console.log("Fetching bus owner dashboard stats with params:", { companyId, startDate, endDate })
+
+        // Initialize metrics with default values
+        const metrics = {
+            total_revenue: "0",
+            total_bookings: 0,
+            total_active_vehicles: 0,
+            average_fare: "0",
+            revenue_per_vehicle: "0",
+            bookings_per_day: "0",
+        }
+
+        let company = null
+
+        // Fetch company information
+        try {
+            const companyResponse = await fetch(`/api/proxy/companies/${companyId}`)
+            if (companyResponse.ok) {
+                const companyData = await companyResponse.json()
+                if (companyData.success && companyData.data) {
+                    company = companyData.data
+                }
+            }
+        } catch (error) {
+            console.warn("Could not fetch company data:", error)
+        }
+
+        // Get company vehicles first
+        let companyVehicleIds: number[] = []
+        try {
+            const vehiclesResponse = await fetch(`/api/proxy/vehicles?company_id=${companyId}`)
+            if (vehiclesResponse.ok) {
+                const vehiclesData = await vehiclesResponse.json()
+                if (vehiclesData.success && Array.isArray(vehiclesData.data)) {
+                    companyVehicleIds = vehiclesData.data.map((vehicle: any) => vehicle.id)
+                    metrics.total_active_vehicles = vehiclesData.data.filter(
+                        (vehicle: any) =>
+                            vehicle.status === "active" || vehicle.is_active === true || vehicle.active === true || !vehicle.status,
+                    ).length
+                }
+            }
+        } catch (error) {
+            console.warn("Could not fetch company vehicles:", error)
+        }
+
+        // Fetch bookings data using the same approach as bookings page
+        try {
+            const params = new URLSearchParams()
+            params.set("start_date", startDate || format(subDays(new Date(), 30), "yyyy-MM-dd"))
+            params.set("end_date", endDate || format(new Date(), "yyyy-MM-dd"))
+            params.set("paginate", "false")
+
+            console.log("Fetching bookings with params:", params.toString())
+
+            const bookingsResponse = await fetch(`/api/proxy/bookings/by_date_range?${params}`, {
+                method: "GET",
+                headers: {
+                    Accept: "application/json",
+                },
+                cache: "no-store",
+            })
+
+            if (bookingsResponse.ok) {
+                const bookingsData = await bookingsResponse.json()
+                console.log("Bookings response for dashboard:", bookingsData)
+
+                let bookings: any[] = []
+
+                // Handle the API response structure
+                if (bookingsData.success) {
+                    if (bookingsData.data && bookingsData.data.data && Array.isArray(bookingsData.data.data)) {
+                        bookings = bookingsData.data.data
+                    } else if (Array.isArray(bookingsData.data)) {
+                        bookings = bookingsData.data
+                    }
+                } else if (Array.isArray(bookingsData)) {
+                    bookings = bookingsData
+                }
+
+                console.log("Raw bookings for dashboard:", bookings.length)
+
+                // Filter bookings for bus owners: only show bookings scanned in by company vehicles
+                if (companyVehicleIds.length > 0) {
+                    const originalCount = bookings.length
+
+                    bookings = bookings.filter((booking) => {
+                        // Must be scanned in (scanned_in_at exists)
+                        if (!booking.scanned_in_at) {
+                            return false
+                        }
+
+                        // Must have a vehicle that scanned it in
+                        if (!booking.vehicle_id) {
+                            return false
+                        }
+
+                        // The vehicle that scanned it must belong to the company
+                        return companyVehicleIds.includes(booking.vehicle_id)
+                    })
+
+                    console.log(`Filtered bookings for dashboard: ${originalCount} -> ${bookings.length} (company: ${companyId})`)
+                }
+
+                // Calculate metrics from filtered bookings
+                metrics.total_bookings = bookings.length
+
+                // Calculate total revenue from bookings
+                const totalRevenue = bookings.reduce((sum, booking) => {
+                    const fare = Number.parseFloat(booking.fare || "0")
+                    const parcelFare = booking.has_percel ? Number.parseFloat(booking.percel_fare || "0") : 0
+                    return sum + fare + parcelFare
+                }, 0)
+                metrics.total_revenue = totalRevenue.toString()
+
+                // Calculate average fare
+                if (bookings.length > 0) {
+                    metrics.average_fare = (totalRevenue / bookings.length).toString()
+                }
+
+                // Calculate revenue per vehicle
+                if (metrics.total_active_vehicles > 0) {
+                    metrics.revenue_per_vehicle = (totalRevenue / metrics.total_active_vehicles).toString()
+                }
+
+                // Calculate bookings per day
+                if (startDate && endDate) {
+                    const start = new Date(startDate)
+                    const end = new Date(endDate)
+                    const daysDiff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1
+                    metrics.bookings_per_day = (bookings.length / daysDiff).toString()
+                }
+            }
+        } catch (error) {
+            console.warn("Could not fetch bookings data for dashboard:", error)
+        }
+
+        const result = {
+            success: true,
+            data: {
+                period: {
+                    start_date: startDate || "",
+                    end_date: endDate || "",
+                },
+                company,
+                metrics,
+            },
+            message: "Bus owner dashboard statistics fetched successfully",
+        }
+
+        console.log("Final bus owner dashboard stats result:", result)
+        return result
+    } catch (error) {
+        console.error("Error fetching bus owner dashboard stats:", error)
+        return {
+            success: false,
+            data: null,
+            message: error instanceof Error ? error.message : "Failed to fetch bus owner dashboard statistics",
+        }
     }
 }
 

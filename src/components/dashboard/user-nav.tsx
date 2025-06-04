@@ -30,7 +30,22 @@ export function UserNav() {
         if (storedUser) {
             try {
                 const user = JSON.parse(storedUser)
-                setUserName(user.fullName || user.username )
+
+                // Priority order for displaying name:
+                // 1. fullName (if available)
+                // 2. firstName (if available)
+                // 3. first_name (snake_case variant)
+                // 4. name (generic name field)
+                // 5. username (fallback)
+                // 6. "Admin" (default fallback)
+                const displayName = user.fullName ||
+                    user.firstName ||
+                    user.first_name ||
+                    user.name ||
+                    user.username
+                    // "Admin"
+
+                setUserName(displayName)
             } catch (error) {
                 console.error("Error parsing user data:", error)
             }

@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { CalendarDateRangePicker } from "@/components/dashboard/date-range-picker"
 import { RevenueDistribution } from "@/components/dashboard/revenue-distribution"
-import { getDashboardStats } from "@/lib/services/dashboard"
+import { getBusOwnerDashboardStats } from "@/lib/services/dashboard"
 import { getCompanies } from "@/lib/services/company"
 import { LoadingSpinner } from "@/components/loading-spinner"
 import { getToken, getUserRoles } from "@/lib/auth"
@@ -114,7 +114,7 @@ export default function BusOwnerDashboard() {
                 })
 
                 // Fetch dashboard stats with company filter
-                const statsResponse = await getDashboardStats(companyId.toString(), startDate, endDate)
+                const statsResponse = await getBusOwnerDashboardStats(companyId.toString(), startDate, endDate)
                 console.log("Bus owner stats response:", statsResponse)
 
                 if (statsResponse.success && statsResponse.data?.metrics) {
